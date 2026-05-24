@@ -241,9 +241,32 @@ git checkout pr/<PR编号>
 git checkout main
 ```
 
+### 一致性验证（本地 vs GitHub）
+
+每次操作前建议确认本地与远程一致：
+
+```bash
+git fetch origin main         # 拉取最新远程状态
+git diff HEAD origin/main     # 对比本地和远程差异
+# 无输出 = 完全一致
+git status                    # 确认 working tree clean
+```
+
+如果发现不一致，先 `git pull origin main` 同步，再继续操作。
+
 ### 提交规范
 
 用中文写 commit message，清晰描述改动内容。不要用英文/Chinglish。
+
+### 已知历史问题：2026-05-24 本地 .git 重建事件
+
+> **背景**：首次 PR #1 合并后，AI 执行 `git rebase origin/main` 失败，导致本地 `.git` 目录丢失。
+>
+> **恢复方式**：`git init` → `git remote add origin` → `git fetch origin main` → `git branch main origin/main` → `git checkout -f main`
+>
+> **验证**：`git diff HEAD origin/main` 输出为空（完全一致）。本地 `main` 与远程 `origin/main` 完全同步，149 个文件全量跟踪。`.gitignore` 正常生效。
+>
+> **影响**：本地 `pr/<编号>` 分支丢失（PR 已合并则不需要）。未来 PR 测试时重新 `git fetch origin pull/<id>/head:pr/<id>` 即可。
 
 ---
 
