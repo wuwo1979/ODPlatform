@@ -56,6 +56,11 @@ coverage.xml
 # Tool metadata (reset/doctor audit logs)
 .odp-meta/
 
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
 # Archives
 *.rar
 *.zip
