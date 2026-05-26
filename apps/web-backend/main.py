@@ -24,7 +24,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import experiments, models, validation
+from api import auth, detection, experiments, llm, models, models_api, users_api, validation
 from db.database import init_db
 
 # ── 日志 ──────────────────────────────────────────────────
@@ -69,6 +69,13 @@ app.add_middleware(
 app.include_router(experiments.router, prefix="/api")
 app.include_router(models.router, prefix="/api")
 app.include_router(validation.router, prefix="/api")
+
+# v1 新增 API（用户面）
+app.include_router(auth.router, prefix="/api/v1")
+app.include_router(users_api.router, prefix="/api/v1")
+app.include_router(detection.router, prefix="/api/v1")
+app.include_router(models_api.router, prefix="/api/v1")
+app.include_router(llm.router, prefix="/api/v1")
 
 
 # ── 健康检查 ──────────────────────────────────────────────

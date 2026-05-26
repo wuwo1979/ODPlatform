@@ -80,3 +80,6 @@ coverage.xml
 # Teaching / student docs (not for main repo)
 docs/teaching/
 【*/
+
+# Web backend uploads (runtime user data)
+apps/web-backend/uploads/
