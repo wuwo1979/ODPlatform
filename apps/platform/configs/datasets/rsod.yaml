@@ -1,29 +1,26 @@
-path: data/RSOD/yolo
+path: F:\python_projects\class\ODPlatform\data
 train: train/images
 val: val/images
 test: test/images
-
 nc: 4
 names:
   0: aircraft
   1: oiltank
   2: overpass
   3: playground
-
 odp_meta:
   dataset: rsod
   source_format: pascal_voc
   task: detect
-  created_at: '2026-05-21T09:36:19'
+  created_at: '2026-05-26T15:46:14'
   split:
     train_rate: 0.8
     val_rate: 0.1
     test_rate: 0.1
     random_state: 42
     counts:
-      train: 749
+      train: 748
       val: 94
-      test: 93
+      test: 94
       total: 936
-
   schema_version: 1

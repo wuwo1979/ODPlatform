@@ -219,12 +219,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             **ultralytics_args,
         )
 
+        rd = results.results_dict if hasattr(results, 'results_dict') else {}
         metrics = {
-            "map50": float(getattr(results, "map50", 0)),
-            "map50_95": float(getattr(results, "map50_95", 0)),
-            "precision": float(getattr(results, "p", 0)),
-            "recall": float(getattr(results, "r", 0)),
-            "fitness": float(getattr(results, "fitness", 0)),
+            "map50":    float(rd.get("metrics/mAP50(B)", rd.get("metrics/mAP50", 0))),
+            "map50_95": float(rd.get("metrics/mAP50-95(B)", rd.get("metrics/mAP50-95", 0))),
+            "precision": float(rd.get("metrics/precision(B)", rd.get("metrics/precision", 0))),
+            "recall":   float(rd.get("metrics/recall(B)", rd.get("metrics/recall", 0))),
+            "fitness":  float(rd.get("fitness", 0)),
         }
         val_dir = val_project_dir / experiment_name
 
