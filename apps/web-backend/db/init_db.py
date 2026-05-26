@@ -95,6 +95,60 @@ def create_tables(db: sqlite3.Connection) -> None:
             ON training_epochs(experiment_id, epoch);
         CREATE INDEX IF NOT EXISTS idx_models_experiment
             ON models(experiment_id);
-        CREATE INDEX IF NOT EXISTS idx_validation_dataset
-            ON validation_reports(dataset);
+        CREATE INDEX IF NOT EXISTS idx_validation_dataset
+            ON validation_reports(dataset);
+
+        -- ============================================================
+        -- 5. 用户表
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS users (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            username        TEXT NOT NULL UNIQUE,
+            password_hash   TEXT NOT NULL,
+            email           TEXT,
+            token           TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ============================================================
+        -- 6. 检测任务表
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS detection_tasks (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            model_name      TEXT NOT NULL,
+            image_filename  TEXT NOT NULL,
+            status          TEXT DEFAULT 'pending',
+            config_json     TEXT,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ============================================================
+        -- 7. 检测结果表
+        -- ============================================================
+        CREATE TABLE IF NOT EXISTS detection_results (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id         INTEGER REFERENCES detection_tasks(id) ON DELETE CASCADE,
+            class_name      TEXT NOT NULL,
+            confidence      REAL NOT NULL,
+            bbox_x1         REAL NOT NULL,
+            bbox_y1         REAL NOT NULL,
+            bbox_x2         REAL NOT NULL,
+            bbox_y2         REAL NOT NULL,
+            created_at      TEXT DEFAULT (datetime('now'))
+        );
+
+        -- ============================================================
+        -- 新增索引
+        -- ============================================================
+        CREATE INDEX IF NOT EXISTS idx_users_username
+            ON users(username);
+        CREATE INDEX IF NOT EXISTS idx_users_token
+            ON users(token);
+        CREATE INDEX IF NOT EXISTS idx_detection_tasks_user
+            ON detection_tasks(user_id);
+        CREATE INDEX IF NOT EXISTS idx_detection_tasks_status
+            ON detection_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_detection_results_task
+            ON detection_results(task_id);
     """)

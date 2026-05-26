@@ -72,11 +72,52 @@ class ModelCreate(BaseModel):
 #  质检报告
 # ============================================================
 
-class ValidationReportCreate(BaseModel):
-    """写入一份新的质检报告。"""
-    dataset: str = Field(..., description="数据集名")
-    run_id: str = Field(..., description="质检运行唯一标识")
-    passed: int = Field(default=0, ge=0)
-    warnings: int = Field(default=0, ge=0)
-    errors: int = Field(default=0, ge=0)
-    report_json: Optional[str] = Field(default=None, description="完整质检报告 JSON 字符串")
+class ValidationReportCreate(BaseModel):
+    """写入一份新的质检报告。"""
+    dataset: str = Field(..., description="数据集名")
+    run_id: str = Field(..., description="质检运行唯一标识")
+    passed: int = Field(default=0, ge=0)
+    warnings: int = Field(default=0, ge=0)
+    errors: int = Field(default=0, ge=0)
+    report_json: Optional[str] = Field(default=None, description="完整质检报告 JSON 字符串")
+
+
+# ============================================================
+#  用户 / 认证
+# ============================================================
+
+class UserRegister(BaseModel):
+    """注册请求。"""
+    username: str = Field(..., min_length=3, max_length=32, description="用户名")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    email: Optional[str] = Field(default=None, description="邮箱")
+
+
+class UserLogin(BaseModel):
+    """登录请求。"""
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码")
+
+
+# ============================================================
+#  检测任务
+# ============================================================
+
+class DetectionCreate(BaseModel):
+    """提交检测任务（JSON 字段，不含图片文件）。"""
+    model_name: str = Field(..., description="模型名称，如 yolo11n_visdrone")
+    image_filename: str = Field(..., description="上传图片的文件名")
+    conf: float = Field(default=0.25, ge=0.01, le=1.0, description="置信度阈值")
+    iou: float = Field(default=0.45, ge=0.01, le=1.0, description="IoU 阈值")
+
+
+# ============================================================
+#  LLM 透传
+# ============================================================
+
+class LLMChatRequest(BaseModel):
+    """LLM 对话请求（透传格式）。"""
+    model: str = Field(default="gpt-4o", description="模型名")
+    messages: list[dict] = Field(..., description="对话消息列表")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=2048, ge=1, le=32768)

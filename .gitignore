@@ -76,6 +76,9 @@ coverage.xml
 *.zip
 *.7z
 
-# Teaching / student docs (not for main repo)
-docs/teaching/
-【*/
+# Teaching / student docs (not for main repo)
+docs/teaching/
+【*/
+
+# Web backend uploads (runtime user data)
+apps/web-backend/uploads/
