@@ -4,6 +4,8 @@ import csv
 import io
 import json
 import logging
+import os
+import shutil
 import tempfile
 import threading
 import time as _time
@@ -20,7 +22,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-from odp_platform.common.paths import RUNS_DIR
+from odp_platform.common.paths import ROOT_DIR, RUNS_DIR
+from odp_platform.inference.visualizer import draw_detections
 from odp_platform.webui.utils import list_images, list_model_files
 
 logger = logging.getLogger(__name__)
@@ -56,7 +59,6 @@ def _release_server_camera():
 
 
 def _gpu_info() -> str:
-    import torch
     if not torch.cuda.is_available():
         return ""
     parts = []
@@ -117,13 +119,6 @@ def _run_single_detection(
         return None, [], "未选择模型", detector_state
 
     try:
-        import numpy as np
-
-        from odp_platform.inference.visualizer import draw_detections
-    except ImportError as exc:
-        return None, [], f"推理依赖未就绪: {exc}", detector_state
-
-    try:
         if isinstance(image, np.ndarray):
             image_np = image
         else:
@@ -163,100 +158,41 @@ def _run_single_detection(
         return rendered, rows, status, detector
     except Exception as exc:
         logger.exception("单图检测失败")
-        import numpy as np
         blank = np.full((100, 300, 3), 200, dtype=np.uint8)
         return blank, [], f"检测失败: {exc}", detector_state
 
 
-def _run_folder_detection(
-    folder_path: str,
-    model_path: str,
-    conf: float,
-    iou: float,
-    detector_state: Any,
-) -> tuple[list[Any], str, Any]:
-    if not folder_path:
-        return [], "请输入文件夹路径", detector_state
-    if not model_path:
-        return [], "未选择模型", detector_state
-
-    try:
-        import numpy as np
-        from PIL import Image
-
-        from odp_platform.inference.visualizer import draw_detections
-    except ImportError as exc:
-        return [], f"依赖未就绪: {exc}", detector_state
-
-    folder = Path(folder_path)
-    if not folder.is_dir():
-        return [], f"路径不存在或不是文件夹: {folder_path}", detector_state
-
-    image_paths = list_images(folder)
-    if not image_paths:
-        return [], f"文件夹中无图片: {folder_path}", detector_state
-
-    is_cached = (
-        detector_state is not None
-        and hasattr(detector_state, '_model_path')
-        and detector_state._model_path == model_path
-    )
-    if is_cached:
-        detector = detector_state
-    else:
-        try:
-            from odp_platform.inference.engine import Detector
-            detector = Detector(model_path)
-        except Exception as exc:
-            return [], f"模型加载失败: {exc}", detector_state
-        detector._model_path = model_path
-    detector.conf = float(conf)
-    detector.iou = float(iou)
-
-    results = []
-    for img_path in image_paths[:100]:
-        try:
-            image = np.array(Image.open(img_path))
-            result = detector.detect(image)
-            rendered = draw_detections(image, result.detections)
-            results.append(rendered)
-        except Exception as exc:
-            logger.warning("跳过图片 %s: %s", img_path, exc)
-            continue
-
-    status = f"处理完成: {len(results)}/{len(image_paths)} 张 | 模型: {Path(model_path).name}"
-    return results, status, detector
-
-
 def _run_folder_detection_wrapped(
+    folder_files: list | None,
     folder_path: str,
     output_dir: str,
     model_path: str,
     conf: float,
     iou: float,
+    max_images: int,
     detector_state: Any,
 ) -> tuple:
-    if not folder_path:
-        return [], "请输入文件夹路径", detector_state, {}, [], []
+    if not folder_files and not folder_path:
+        return [], "请上传图片或输入文件夹路径", detector_state, {}, [], []
     if not model_path:
         return [], "未选择模型", detector_state, {}, [], []
 
-    try:
-        import cv2
-        import numpy as np
-        from PIL import Image
-
-        from odp_platform.inference.visualizer import draw_detections
-    except ImportError as exc:
-        return [], f"依赖未就绪: {exc}", detector_state, {}, [], []
-
-    folder = Path(folder_path)
-    if not folder.is_dir():
-        return [], f"路径不存在: {folder_path}", detector_state, {}, [], []
+    if folder_files:
+        folder = Path(tempfile.mkdtemp(prefix="odp_folder_"))
+        for f in folder_files:
+            src = f if isinstance(f, str) else f.name
+            shutil.copy2(src, folder / Path(src).name)
+    else:
+        folder = Path(folder_path)
+        if not folder.is_dir():
+            return [], f"路径不存在: {folder_path}", detector_state, {}, [], []
 
     image_paths = list_images(folder)
     if not image_paths:
         return [], f"文件夹中无图片: {folder_path}", detector_state, {}, [], []
+
+    total_available = len(image_paths)
+    process_limit = min(max_images, total_available) if max_images > 0 else total_available
 
     is_cached = (
         detector_state is not None
@@ -287,7 +223,7 @@ def _run_folder_detection_wrapped(
     total_ms = 0.0
     total_objs = 0
 
-    for img_path in image_paths[:100]:
+    for img_path in image_paths[:process_limit]:
         try:
             image = np.array(Image.open(img_path))
             t0 = __import__("time").time()
@@ -321,14 +257,16 @@ def _run_folder_detection_wrapped(
             continue
 
     summary = {
-        "总图片": len(image_paths),
+        "总图片": total_available,
+        "已处理": process_limit,
         "成功": len(results),
         "总目标数": total_objs,
         "总耗时(ms)": round(total_ms, 1),
         "平均每张(ms)": round(total_ms / max(len(results), 1), 1),
         "类别分布": class_totals,
     }
-    status = f"处理完成: {len(results)}/{len(image_paths)} 张 | {total_objs} 个目标 | 模型: {Path(model_path).name}"
+    limit_info = f" (上限 {process_limit})" if process_limit < total_available else ""
+    status = f"处理完成: {len(results)}/{total_available} 张{limit_info} | {total_objs} 个目标 | 模型: {Path(model_path).name}"
     return results, status, detector, summary, detail_rows, detail_rows
 
 
@@ -341,9 +279,6 @@ def _run_server_camera(
 ) -> Any:
     import os
     import warnings
-
-    import cv2
-    import numpy as np
 
     from odp_platform.inference.visualizer import draw_detections, draw_info_panel
 
@@ -571,11 +506,6 @@ def _run_video_detection(
         return [], "请上传视频并选择模型", [], {}, ""
 
     try:
-        from odp_platform.inference.visualizer import draw_detections
-    except ImportError as exc:
-        return [], f"依赖未就绪: {exc}", [], {}, ""
-
-    try:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             return [], f"无法打开视频: {video_path}", [], {}, ""
@@ -584,13 +514,13 @@ def _run_video_detection(
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
 
         if max_frames > 0:
             total_frames = min(total_frames, max_frames)
 
         detector = _get_or_create_detector(model_path, conf, iou)
         if detector is None:
+            cap.release()
             return [], "模型加载失败", [], {}, ""
 
         out_temp = Path(tempfile.mkdtemp(prefix="odp_video_"))
@@ -599,7 +529,6 @@ def _run_video_detection(
         out_fps = max(1.0, fps / max(frame_interval, 1))
         video_writer = cv2.VideoWriter(out_video_path, fourcc, out_fps, (w, h))
 
-        cap = cv2.VideoCapture(video_path)
         frame_idx = 0
         processed_count = 0
         total_objs = 0
@@ -609,46 +538,48 @@ def _run_video_detection(
         frame_details = []
         t_start = _time.time()
 
-        while True:
-            ret, frame_bgr = cap.read()
-            if not ret:
-                break
-            if max_frames > 0 and frame_idx >= max_frames:
-                break
+        try:
+            while True:
+                ret, frame_bgr = cap.read()
+                if not ret:
+                    break
+                if max_frames > 0 and frame_idx >= max_frames:
+                    break
 
-            if frame_idx % frame_interval == 0:
-                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                t0 = _time.time()
-                result = detector.detect(frame_rgb)
-                elapsed_ms = (_time.time() - t0) * 1000
+                if frame_idx % frame_interval == 0:
+                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                    t0 = _time.time()
+                    result = detector.detect(frame_rgb)
+                    elapsed_ms = (_time.time() - t0) * 1000
 
-                rendered = draw_detections(frame_rgb, result.detections)
-                processed_count += 1
-                total_infer_ms += elapsed_ms
+                    rendered = draw_detections(frame_rgb, result.detections)
+                    processed_count += 1
+                    total_infer_ms += elapsed_ms
 
-                classes_in_frame = {}
-                for d in result.detections:
-                    classes_in_frame[d.class_name] = classes_in_frame.get(d.class_name, 0) + 1
-                    class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
-                total_objs += len(result.detections)
+                    classes_in_frame = {}
+                    for d in result.detections:
+                        classes_in_frame[d.class_name] = classes_in_frame.get(d.class_name, 0) + 1
+                        class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
+                    total_objs += len(result.detections)
 
-                if len(sample_frames) < 500:
-                    sample_frames.append(rendered)
+                    if len(sample_frames) < 500:
+                        sample_frames.append(rendered)
 
-                frame_details.append({
-                    "帧": frame_idx,
-                    "目标数": len(result.detections),
-                    "耗时(ms)": round(elapsed_ms, 1),
-                    "类别": ", ".join(f"{k}:{v}" for k, v in classes_in_frame.items()) if classes_in_frame else "-",
-                })
+                    frame_details.append({
+                        "帧": frame_idx,
+                        "目标数": len(result.detections),
+                        "耗时(ms)": round(elapsed_ms, 1),
+                        "类别": ", ".join(f"{k}:{v}" for k, v in classes_in_frame.items()) if classes_in_frame else "-",
+                    })
 
-                rendered_bgr = cv2.cvtColor(rendered, cv2.COLOR_RGB2BGR)
-                video_writer.write(rendered_bgr)
+                    rendered_bgr = cv2.cvtColor(rendered, cv2.COLOR_RGB2BGR)
+                    video_writer.write(rendered_bgr)
 
-            frame_idx += 1
+                frame_idx += 1
+        finally:
+            cap.release()
+            video_writer.release()
 
-        cap.release()
-        video_writer.release()
         elapsed_total = _time.time() - t_start
         avg_ms = total_infer_ms / max(processed_count, 1)
 
@@ -736,8 +667,14 @@ def create_folder_detection_ui() -> None:
 
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
         with gr.Column(scale=1):
+            folder_files = gr.File(
+                label="上传图片文件（点击选择多张）",
+                file_count="multiple",
+                file_types=["image"],
+                scale=1,
+            )
             folder_in = gr.Textbox(
-                label="图片文件夹路径",
+                label="或输入图片文件夹路径",
                 placeholder="eg. F:/datasets/test_images",
                 max_lines=1,
             )
@@ -745,6 +682,10 @@ def create_folder_detection_ui() -> None:
                 label="输出目录（可选）",
                 placeholder="留空默认不保存",
                 max_lines=1,
+            )
+            max_images_input = gr.Number(
+                value=0, minimum=0, maximum=99999, precision=0,
+                label="最大处理张数（填 0=全部处理）",
             )
             folder_detect_btn = gr.Button("处理文件夹", variant="primary", size="lg")
             folder_status = gr.Textbox(
@@ -767,7 +708,7 @@ def create_folder_detection_ui() -> None:
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
     folder_detect_btn.click(
         fn=_run_folder_detection_wrapped,
-        inputs=[folder_in, output_dir, model_dd, conf_slider, iou_slider, detector_state],
+        inputs=[folder_files, folder_in, output_dir, model_dd, conf_slider, iou_slider, max_images_input, detector_state],
         outputs=[folder_gallery, folder_status, detector_state, folder_summary, folder_detail, folder_results_state],
     )
 

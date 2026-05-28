@@ -129,13 +129,13 @@ def create_frame_source(
     if path.is_dir() and "folder" in _SOURCE_REGISTRY:
         return _SOURCE_REGISTRY["folder"](source)
 
-    ext = path.suffix.lower().lstrip(".")
+    ext = path.suffix.lower()
     source_name = _EXTENSION_REGISTRY.get(ext)
     if source_name and source_name in _SOURCE_REGISTRY:
         return _SOURCE_REGISTRY[source_name](source)
 
     raise ValueError(
-        f"不支持的文件格式: '.{ext}'\n"
+        f"不支持的文件格式: '{ext}'\n"
         f"  已注册的视频扩展名: {[k for k, v in _EXTENSION_REGISTRY.items() if v == 'video']}\n"
         f"  已注册的图片扩展名: {[k for k, v in _EXTENSION_REGISTRY.items() if v == 'image']}"
     )

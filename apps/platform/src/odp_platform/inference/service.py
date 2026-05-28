@@ -175,7 +175,7 @@ class InferService:
 
             infer_time = (datetime.now() - start).total_seconds()
 
-            if result.stats["frames"] > 0:
+            if result.frames > 0:
                 log.info("=" * 60)
                 log.info(f"推理总耗时: {infer_time:.2f} 秒")
                 log.info(f"输出目录:   {output_dir}")
@@ -188,7 +188,7 @@ class InferService:
             return InferResult(
                 success=True,
                 output_dir=output_dir,
-                stats=result.to_dict() if isinstance(result, InferStats) else result.stats,
+                stats=result.to_dict(),
                 infer_time=infer_time,
                 saved=want_save,
                 log_path=str(log_path) if log_path else None,

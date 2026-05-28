@@ -14,6 +14,22 @@
 
 ---
 
+## 插曲：30 秒快速入门
+
+想在 30 秒内跑通一个检测任务？
+
+```bash
+pip install -e ./apps/platform          # 安装
+odp-init                                 # 初始化目录
+odp-webui                                # 启动 WebUI (http://127.0.0.1:7860)
+```
+
+打开浏览器 → "单图检测" Tab → 选模型 → 上传图片 → 点检测。完成。
+
+> 详细命令参考 [ODPlatform_命令速查.md](ODPlatform_命令速查.md)
+
+---
+
 ## 第一章：五层架构总览
 
 ODPlatform 的核心架构是 **CLI → Service → Core → Config → Common** 五层。
@@ -148,25 +164,11 @@ ODPlatform 的核心架构是 **CLI → Service → Core → Config → Common**
 
 **CLI 层设计模式**：每个命令文件 = 一个 `_build_parser()` + 一个 `main()` 函数。
 
-```python
-# cli/train.py 的典型结构
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="odp-train")
-    parser.add_argument("--dataset", "-d", required=True)
-    parser.add_argument("--epochs", type=int)
-    # ...更多参数
-    return parser
-
-def main() -> int:
-    args = _build_parser().parse_args()
-    # 调用 Service 层
-    config = build_config(task="train", ...)        # → Config 层
-    result = run_experiment(config)                  # → Service 层
-    print(f"mAP50: {result.map50:.4f}")
-    return 0
-```
+> 源码参考：[cli/train.py](apps/platform/src/odp_platform/cli/train.py) — 典型的 CLI → Service 调用模式
 
 ### 2.2 Service 层（第 2 层）
+
+> 源码参考：[inference/service.py](apps/platform/src/odp_platform/inference/service.py) — InferService 编排 | [training/experiment.py](apps/platform/src/odp_platform/training/experiment.py) — 训练编排
 
 服务层编排完整业务流程，一个函数完成一个完整用例。
 
@@ -276,6 +278,8 @@ odp-infer --source test.jpg --model best.pt
 
 ### 2.3 Core 层（第 3 层）
 
+> 源码参考：[inference/engine.py](apps/platform/src/odp_platform/inference/engine.py) — Detector | [data_pipeline/core/](apps/platform/src/odp_platform/data_pipeline/core/) — 格式转换器
+
 核心层实现单一业务逻辑，每个文件只做一件事。
 
 #### 注册表模式 — 数据转换器
@@ -352,6 +356,8 @@ class FrameSource(ABC):
 
 ### 2.4 Config 层（第 4 层）
 
+> 源码参考：[run_config/](apps/platform/src/odp_platform/run_config/) — 配置管理子系统，核心文件 merger.py（三源合并）、schema.py（TraceRecord）
+
 配置管理子系统 `run_config/` 独立于业务链：
 
 ```
@@ -400,6 +406,8 @@ restored = restore_from_snapshot(loaded_snapshot)
 ```
 
 ### 2.5 Common 层（第 5 层）
+
+> 源码参考：[common/paths.py](apps/platform/src/odp_platform/common/paths.py) — marker 路径探测 | [common/logging_utils.py](apps/platform/src/odp_platform/common/logging_utils.py) — 日志装配
 
 基础设施层，不依赖任何业务模块。
 
@@ -731,9 +739,59 @@ except RequestException:
 
 ---
 
-## 第六章：学习路线图
+## 第六章：常见问题排查（新增）
 
-### 6.1 按层学习顺序
+### 摄像头打不开
+
+```
+[ WARN:0@9.428] global cap.cpp:480 ... backend is generally available but can't be used
+[ERROR:0@11.313] global obsensor_uvc_stream_channel.cpp:163 Camera index out of range
+```
+
+**可能原因**（按概率排序）：
+1. 摄像头被其他程序占用（相机/浏览器/会议软件）→ 关闭占用程序
+2. 摄像头硬件开关被关闭（部分笔记本有物理开关）→ 检查
+3. OpenCV 后端枚举失败（MSMF/DSHOW）→ 代码中有降级逻辑，会自动尝试
+
+**代码降级路径**：MSMF → DSHOW → 无后端 `VideoCapture(cam_id)`。全部失败则显示"无摄像头"占位图。
+
+### CUDA Out of Memory
+
+```
+torch.cuda.OutOfMemoryError: CUDA out of memory.
+```
+
+**解决方案**（按推荐顺序）：
+1. 降低 `batch` 参数
+2. 降低 `imgsz` 参数
+3. 开启 AMP（混合精度训练，默认已开）
+4. 回退到 CPU：`device="cpu"`
+
+### 模型加载失败
+
+```
+Error: No model found at path ...
+```
+
+**排查步骤**：
+1. 确认 `.pt` 文件在 `data/models/checkpoints/` 目录下
+2. 确认文件未损坏：`python -c "from ultralytics import YOLO; YOLO('path/to/model.pt')"`
+3. 确认文件名不包含中文或特殊字符
+4. WebUI 中可手动输入绝对路径绕过文件扫描
+
+### Windows 中文乱码
+
+```
+??? ?? ???
+```
+
+修复方式：日志系统已自动调用 `sys.stdout.reconfigure(encoding="utf-8")`。如果仍乱码，检查终端是否支持 UTF-8（Windows Terminal 推荐）。
+
+---
+
+## 第七章：学习路线图
+
+### 7.1 按层学习顺序
 
 | 优先级 | 层 | 核心文件 | 预计时间 | 理由 |
 |:------:|----|---------|:--------:|------|
@@ -746,7 +804,7 @@ except RequestException:
 | ⭐ | Service | data_validation/service.py, checks/ | 1h | 质量保障 |
 | ⭐ | Service | evaluation/service.py | 0.5h | 模型评估 |
 
-### 6.2 答辩重点准备
+### 7.2 答辩重点准备
 
 参考 [docs/ODPlatform_答辩演练问题集.md](docs/ODPlatform_答辩演练问题集.md)，高频考点 Top 5：
 
@@ -756,7 +814,7 @@ except RequestException:
 4. **Monorepo 优劣**（Q1-2）：统一版本、原子提交、共享基础设施
 5. **注册表调度模式**（Q4-4）：data_pipeline 互斥分发 vs data_validation 聚合执行
 
-### 6.3 推荐阅读路径
+### 7.3 推荐阅读路径
 
 ```
 ① common/paths.py           ← marker 路径探测
