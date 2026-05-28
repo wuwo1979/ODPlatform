@@ -4,10 +4,10 @@ import csv
 import json
 import logging
 import re
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Callable
+
+import requests
 
 from odp_platform.common.paths import CONFIGS_DATASETS_DIR, RUNS_DIR
 from odp_platform.webui.utils import list_model_files
@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# Tool Implementations
+# Tool Implementations  (all return ASCII-safe text)
 # =========================================================
 
 def tool_list_models() -> str:
     models = list_model_files()
     if not models:
-        return "📭 未找到任何 .pt 模型文件"
-    lines = [f"📦 共 {len(models)} 个模型:"]
+        return "[INFO] 未找到任何 .pt 模型文件"
+    lines = [f"[INFO] 共 {len(models)} 个模型:"]
     for m in models:
         p = Path(m)
         size_mb = p.stat().st_size / 1024 / 1024 if p.exists() else 0
@@ -34,8 +34,8 @@ def tool_list_models() -> str:
 def tool_list_datasets() -> str:
     yamls = sorted(CONFIGS_DATASETS_DIR.glob("*.yaml"))
     if not yamls:
-        return "📭 未找到任何数据集配置文件"
-    lines = [f"📂 共 {len(yamls)} 个数据集:"]
+        return "[INFO] 未找到任何数据集配置文件"
+    lines = [f"[INFO] 共 {len(yamls)} 个数据集:"]
     for y in yamls:
         lines.append(f"  - {y.stem}")
     return "\n".join(lines)
@@ -44,11 +44,11 @@ def tool_list_datasets() -> str:
 def tool_list_experiments() -> str:
     exp_dir = RUNS_DIR / "experiments"
     if not exp_dir.exists():
-        return "📭 暂无训练实验"
+        return "[INFO] 暂无训练实验"
     exps = sorted([d.name for d in exp_dir.iterdir() if d.is_dir()], reverse=True)
     if not exps:
-        return "📭 暂无训练实验"
-    lines = [f"🧪 共 {len(exps)} 个实验:"]
+        return "[INFO] 暂无训练实验"
+    lines = [f"[INFO] 共 {len(exps)} 个实验:"]
     for name in exps:
         csv_path = exp_dir / name / "results.csv"
         if csv_path.exists():
@@ -70,14 +70,14 @@ def tool_list_experiments() -> str:
 def tool_get_experiment(name: str) -> str:
     exp_dir = RUNS_DIR / "experiments" / name
     if not exp_dir.exists():
-        return f"❌ 实验不存在: {name}"
+        return f"[ERROR] 实验不存在: {name}"
     csv_path = exp_dir / "results.csv"
     if not csv_path.exists():
-        return f"❌ 实验 {name} 无 results.csv"
+        return f"[ERROR] 实验 {name} 无 results.csv"
     with open(csv_path) as f:
         rows = list(csv.DictReader(f))
     if not rows:
-        return f"❌ 实验 {name} 的 results.csv 为空"
+        return f"[ERROR] 实验 {name} 的 results.csv 为空"
     last = rows[-1]
     best = max(rows, key=lambda r: float(r.get("metrics/mAP50(B)", 0)))
     info = {
@@ -107,9 +107,9 @@ def tool_run_inference(model_path: str, image_path: str, conf: float = 0.25, iou
     model_file = Path(model_path)
     image_file = Path(image_path)
     if not model_file.exists():
-        return f"❌ 模型文件不存在: {model_path}"
+        return f"[ERROR] 模型文件不存在: {model_path}"
     if not image_file.exists():
-        return f"❌ 图片文件不存在: {image_path}"
+        return f"[ERROR] 图片文件不存在: {image_path}"
     try:
         from odp_platform.inference.engine import Detector
         import cv2
@@ -117,34 +117,39 @@ def tool_run_inference(model_path: str, image_path: str, conf: float = 0.25, iou
         detector.warmup()
         img = cv2.imread(str(image_file))
         if img is None:
-            return f"❌ 无法读取图片: {image_path}"
+            return f"[ERROR] 无法读取图片: {image_path}"
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         result = detector.detect(img_rgb)
         lines = [
-            f"✅ 推理完成",
-            f"模型: {model_file.name}",
-            f"图片: {image_file.name}",
-            f"检测目标: {len(result.detections)} 个",
-            f"推理耗时: {result.inference_ms:.1f}ms",
+            f"[OK] 推理完成",
+            f"  模型: {model_file.name}",
+            f"  图片: {image_file.name}",
+            f"  检测目标: {len(result.detections)} 个",
+            f"  推理耗时: {result.inference_ms:.1f}ms",
         ]
         for d in result.detections[:10]:
-            lines.append(f"  - {d.class_name} (置信度: {d.confidence:.3f}, 框: [{d.bbox[0]:.3f}, {d.bbox[1]:.3f}, {d.bbox[2]:.3f}, {d.bbox[3]:.3f}])")
+            lines.append(
+                f"  - {d.class_name} "
+                f"(置信度: {d.confidence:.3f}, "
+                f"框: [{d.bbox[0]:.3f}, {d.bbox[1]:.3f}, "
+                f"{d.bbox[2]:.3f}, {d.bbox[3]:.3f}])"
+            )
         if len(result.detections) > 10:
             lines.append(f"  ... 还有 {len(result.detections) - 10} 个目标")
         return "\n".join(lines)
     except ImportError as e:
-        return f"❌ 推理模块未就绪: {e}"
+        return f"[ERROR] 推理模块未就绪: {e}"
     except Exception as e:
-        return f"❌ 推理失败: {e}"
+        return f"[ERROR] 推理失败: {e}"
 
 
 def tool_get_gpu_info() -> str:
     try:
         import torch
     except ImportError:
-        return "PyTorch 未安装"
+        return "[INFO] PyTorch 未安装"
     if not torch.cuda.is_available():
-        return "GPU 不可用 (CUDA)"
+        return "[INFO] GPU 不可用 (CUDA)"
     lines = []
     for i in range(torch.cuda.device_count()):
         props = torch.cuda.get_device_properties(i)
@@ -152,8 +157,11 @@ def tool_get_gpu_info() -> str:
         allocated = torch.cuda.memory_allocated(i) / 1024**3
         reserved = torch.cuda.memory_reserved(i) / 1024**3
         free = total - reserved
-        lines.append(f"GPU{i} [{props.name}]: 已用 {allocated:.1f}G / 空闲 {free:.1f}G / 总计 {total:.1f}G")
-    return "\n".join(lines)
+        lines.append(
+            f"  GPU{i} [{props.name}]: "
+            f"已用 {allocated:.1f}G / 空闲 {free:.1f}G / 总计 {total:.1f}G"
+        )
+    return "[INFO] GPU 状态:\n" + "\n".join(lines)
 
 
 # =========================================================
@@ -202,7 +210,7 @@ def run_agent(
     api_base: str,
     model_name: str,
 ) -> tuple[list[dict[str, str]], str]:
-    """执行 agent：关键词匹配 → 本地执行工具 → LLM 美化输出。
+    """执行 agent：关键词匹配 -> 本地执行工具 -> LLM 美化输出。
 
     Returns:
         (updated_history, empty_string_for_textbox)
@@ -214,43 +222,46 @@ def run_agent(
 
     history.append({"role": "user", "content": text})
 
-    # ── 尝试匹配工具 ──────────────────────────────────
     tool_result: str | None = None
-    tool_used: str | None = None
 
     # 检测/推理（需要路径参数）
     if re.search(r"推理|检测|识别|infer|detect", text, re.IGNORECASE):
         model_path = _resolve_model_path(text)
         image_path = _resolve_image_path(text)
         if model_path and image_path:
-            tool_used = "run_inference"
             tool_result = tool_run_inference(model_path, image_path)
         elif model_path and not image_path:
-            tool_result = f"⚠️ 检测到模型 {model_path}，但未找到图片路径。请提供图片路径。"
+            tool_result = (
+                f"[WARN] 检测到模型 {model_path}，但未找到图片路径。\n"
+                f"请提供图片路径，例如: C:\\path\\to\\image.jpg"
+            )
         elif not model_path and image_path:
-            tool_result = f"⚠️ 检测到图片 {image_path}，但未找到模型路径。请提供模型路径。"
+            tool_result = (
+                f"[WARN] 检测到图片 {image_path}，但未找到模型路径。\n"
+                f"请提供 .pt 模型路径"
+            )
         else:
             models = list_model_files()
             if models:
-                tool_result = f"请指定模型和图片路径。可用模型:\n" + "\n".join(f"  - {m}" for m in models)
+                tool_result = "[INFO] 请指定模型和图片路径。可用模型:\n" + \
+                    "\n".join(f"  - {m}" for m in models)
             else:
-                tool_result = "没有可用模型，请先上传 .pt 文件"
+                tool_result = "[ERROR] 没有可用模型，请先上传 .pt 文件"
 
     # 关键词匹配通用工具
     if tool_result is None:
-        for pattern, name, fn, params in _TOOL_MAP:
+        for pattern, name, fn, _ in _TOOL_MAP:
             if pattern.search(text):
-                tool_used = name
                 tool_result = fn()
                 break
 
-    # ── 如果匹配到工具，用 LLM 美化回复 ──────────────
+    # 匹配到工具：用 LLM 美化回复
     if tool_result is not None:
         formatted = _format_with_llm(text, tool_result, api_key, api_base, model_name)
         history.append({"role": "assistant", "content": formatted})
         return history, ""
 
-    # ── 没有匹配到工具，走普通 LLM 对话 ──────────────
+    # 没有匹配到工具，走普通 LLM 对话
     return _simple_chat_fallback(history, api_key, api_base, model_name)
 
 
@@ -282,7 +293,10 @@ def _simple_chat_fallback(
     model_name: str,
 ) -> tuple[list[dict[str, str]], str]:
     """没有匹配工具时，直接 LLM 对话。"""
-    system_prompt = "你是 DeepSeek 模型（不是 OpenAI），是 ODPlatform 的智能助手。你可以帮助用户查询模型、数据集、实验、GPU状态和执行推理检测。"
+    system_prompt = (
+        "你是 DeepSeek 模型（不是 OpenAI），是 ODPlatform 的智能助手。"
+        "你可以帮助用户查询模型、数据集、实验、GPU状态和执行推理检测。"
+    )
     messages = [{"role": "system", "content": system_prompt}]
     for msg in history:
         messages.append({"role": msg["role"], "content": str(msg.get("content", ""))})
@@ -297,25 +311,26 @@ def _call_llm(
     api_base: str,
     model_name: str,
 ) -> str:
-    """调用 LLM API 获取回复。"""
+    """调用 LLM API 获取回复。使用 requests 库避免 urllib 编码问题。"""
     url = f"{api_base.rstrip('/')}/chat/completions"
-    payload = json.dumps({
+    payload = {
         "model": model_name,
         "messages": messages,
         "stream": False,
         "max_tokens": 4096,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
+    }
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"]
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return f"API 请求失败 ({exc.code}): {body[:300]}"
-    except Exception as exc:
+        resp = requests.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+    except requests.exceptions.HTTPError as exc:
+        body = exc.response.text[:300] if exc.response is not None else ""
+        return f"API 请求失败 ({exc.response.status_code if exc.response else '?'}): {body}"
+    except requests.exceptions.RequestException as exc:
         return f"请求异常: {exc}"

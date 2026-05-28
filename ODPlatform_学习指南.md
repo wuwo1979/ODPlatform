@@ -437,9 +437,554 @@ odp-backend
 
 ---
 
-## 9. 学习路线图
+## 9. 训练全流程详解
 
-### 9.1 按模块优先级学习
+### 9.1 训练入口
+
+ODPlatform 提供两种训练入口：
+
+| 入口 | 方式 | 适用场景 |
+|------|------|---------|
+| CLI 命令行 | `odp-train --dataset rsod --model yolo11n.pt` | 服务器/脚本批量训练 |
+| WebUI 管理员 | 训练 Tab 图形化配置 | 快速实验/调参 |
+| Python API | `run_experiment(config)` | 自定义训练流程 |
+
+### 9.2 训练流程图
+
+```
+用户输入
+  │
+  ├── 数据集名 (--dataset)
+  ├── 模型名   (--model)
+  └── 超参数   (--epochs, --batch, --lr0 ...)
+  │
+  ▼
+┌─────────────────────────────┐
+│  Step 1: 数据转换           │   odp-transform (可选)
+│   VOC/COCO/LabelMe → YOLO   │
+└─────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────┐
+│  Step 2: 数据质检           │   odp-validate
+│   YAML校验/标签检查/泄露检测 │
+└─────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────┐
+│  Step 3: 配置生成           │   odp-config
+│   自动生成 + 快照保存       │
+└─────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────┐
+│  Step 4: 模型训练           │   YOLO.train()
+│   Ultralytics 引擎          │
+└─────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────┐
+│  输出                       │
+│  ├─ results.csv (逐轮指标)   │
+│  ├─ weights/best.pt (权重)   │
+│  ├─ results.png (损失曲线)   │
+│  ├─ confusion_matrix.png    │
+│  ├─ BoxPR_curve.png         │
+│  └─ labels.jpg (类别分布)    │
+└─────────────────────────────┘
+  │
+  ▼
+┌─────────────────────────────┐
+│  后处理                      │
+│  ├─ checkpoint → checkpoints/│
+│  ├─ Backend hooks → 数据库   │
+│  └─ POST /api/experiments    │
+└─────────────────────────────┘
+```
+
+### 9.3 ExperimentConfig 配置对象
+
+```python
+@dataclass
+class ExperimentConfig:
+    name: str           # 实验名称
+    dataset: str        # 数据集名（对应 configs/datasets/<name>.yaml）
+    model: str          # 模型名或 .pt 路径
+    task: str           # 任务类型 (detect/segment/classify)
+    epochs: int         # 训练轮数
+    batch: int          # 批次大小
+    imgsz: int          # 输入图片尺寸
+    lr0: float          # 初始学习率
+    device: str         # 训练设备 (""=auto, "0"=GPU0, "cpu")
+    workers: int        # 数据加载线程
+    optimizer: str      # 优化器 (auto/SGD/Adam/AdamW)
+    amp: bool           # 混合精度训练
+    patience: int       # EarlyStopping 耐心值
+    seed: int           # 随机种子
+```
+
+### 9.4 训练输出目录结构
+
+```
+data/runs/experiments/<experiment_name>/
+├── config_snapshot.json     # 配置快照
+├── results.csv              # 逐轮指标 CSV
+├── results.png              # 训练损失 + 验证指标曲线
+├── confusion_matrix.png     # 混淆矩阵
+├── confusion_matrix_normalized.png  # 归一化混淆矩阵
+├── BoxPR_curve.png          # PR 曲线
+├── BoxF1_curve.png          # F1 曲线
+├── labels.jpg               # 类别分布
+├── weights/
+│   ├── best.pt              # 最佳权重
+│   └── last.pt              # 最后 epoch 权重
+└── train_summary.json       # 训练摘要
+```
+
+训练完成后，best.pt 自动复制到 `data/models/checkpoints/best_<实验名>.pt`。
+
+### 9.5 CSV 指标适配
+
+Ultralytics 的 results.csv 列名在不同版本中可能变化。项目通过 `_COLUMN_ALIASES` 映射表做兼容：
+
+| CSV 原始列名 | 规范化名 | 含义 |
+|---|---|---|
+| `metrics/mAP50(B)` | `map50` | 平均精度 @IoU=0.5 |
+| `metrics/mAP50-95(B)` | `map50_95` | 平均精度 @IoU=0.5:0.95 |
+| `metrics/precision(B)` | `precision` | 精确率 |
+| `metrics/recall(B)` | `recall` | 召回率 |
+| `train/box_loss` | `box_loss` | 边界框损失 |
+| `lr/pg0` | `lr` | 学习率 |
+
+YOLO 升级改列名时，只需在 `_COLUMN_ALIASES` 中加一行映射，不会导致图表白屏。
+
+### 9.6 Backend Hooks 机制
+
+训练过程中，`TrainingHooks` 类自动将指标同步到后端数据库：
+
+```
+on_train_start()  → POST /api/experiments         ← 注册实验
+on_epoch_end()    → POST /api/experiments/{id}/epochs  ← 写入逐轮指标
+on_train_end()    → PATCH /api/experiments/{id}/status ← 更新完成状态
+on_train_failed() → PATCH /api/experiments/{id}/status ← 标记失败
+```
+
+后端不可达时，静默降级（warning 日志），不阻塞训练。
+
+---
+
+## 10. 推理全流程详解
+
+### 10.1 推理入口
+
+| 入口 | 命令/方式 | 适用场景 |
+|------|----------|---------|
+| CLI | `odp-infer detect --model best.pt --input test.jpg` | 批量/脚本 |
+| WebUI 用户 | 单图/文件夹/视频 Tab | 日常检测 |
+| Python API | `Detector().detect(image)` | 集成到其他系统 |
+| Agent 对话 | 在 LLM Tab 说"帮我检测这张图" | 快速演示 |
+
+### 10.2 推理流程图
+
+```
+输入源识别 (create_frame_source)
+  │
+  ├── 单张图片 → ImageSource
+  ├── 文件夹   → ImageFolderSource
+  ├── 视频文件 → VideoSource
+  ├── 摄像头   → CameraSource (OpenCV)
+  └── 数字 ID  → CameraSource (设备号)
+  │
+  ▼
+模型加载 (Detector)
+  │
+  ├── 加载 .pt 权重 → YOLO(model_path)
+  ├── GPU JIT 预热 → warmup()
+  └── 缓存到 _detector_cache (复用)
+  │
+  ▼
+逐帧推理 (detect(image))
+  │
+  ├── YOLO 前向传播
+  ├── NMS 非极大值抑制
+  └── 返回 InferenceResult
+  │
+  ▼
+结果可视化 (draw_detections)
+  │
+  ├── 绘制检测框 (cv2.rectangle)
+  ├── 标签+置信度 (cv2.putText)
+  └── 信息面板 (draw_info_panel)
+  │
+  ▼
+结果输出
+  ├── 标注图片
+  ├── 检测明细表 (类别/置信度/坐标)
+  ├── CSV 导出（文件夹/视频）
+  └── 实时流（摄像头）
+```
+
+### 10.3 Detector 核心类
+
+```python
+class Detector:
+    def __init__(self, model_path: str, device: str = "auto",
+                 conf: float = 0.25, iou: float = 0.45):
+        # 加载 YOLO 模型
+        # 自动选择设备 (CUDA > MPS > CPU)
+
+    def warmup(self, image_size=(640, 640)):
+        # 用纯黑图跑一次推理，消除首次 CUDA kernel 编译延迟
+        # 仅在 CUDA 下生效
+
+    def detect(self, image: np.ndarray) -> InferenceResult:
+        # YOLO 推理 → NMS → 返回检测结果
+
+    def release(self):
+        # 释放 GPU 显存
+
+    @property
+    def model_path(self) -> str:
+    @property
+    def class_names(self) -> list[str]:
+```
+
+### 10.4 InferenceResult 数据结构
+
+```python
+@dataclass
+class InferenceResult:
+    detections: list[Detection]   # 检测结果列表
+    inference_ms: float           # 推理耗时 (ms)
+    image_size: tuple[int, int]   # (宽, 高)
+
+@dataclass
+class Detection:
+    class_id: int                 # 类别 ID
+    class_name: str               # 类别名称
+    confidence: float             # 置信度 [0, 1]
+    bbox: tuple[float, ...]       # 归一化边界框 [x1, y1, x2, y2]
+```
+
+### 10.5 帧源架构 (frame_source)
+
+`inference/frame_source/` 是独立的帧输入抽象层，可整包拷贝到其他项目：
+
+```
+frame_source/
+├── core/
+│   ├── base.py      FrameSource 抽象基类
+│   ├── config.py    CameraConfig (Pydantic)
+│   └── types.py     类型常量
+├── sources/
+│   ├── camera.py    CameraSource (OpenCV)
+│   ├── video.py     VideoSource
+│   └── image.py     ImageSource / ImageFolderSource
+├── wrappers/
+│   ├── threaded.py  ThreadedSource (实时推理首选)
+│   └── aio.py       AsyncSource (异步接口)
+├── factory.py       create_frame_source() + 注册表模式
+└── overlay.py       HUD 叠加层
+```
+
+**注册表模式**：新增帧源类型只需 `@register_source("rtsp")`，无需改 factory 的 if-else 链。
+
+```python
+@register_source("rtsp", extensions=[])
+class RTSPSource(FrameSource):
+    ...
+```
+
+**线程化包装**（实时推理首选）：采集放后台线程，消费端从缓冲拿最新帧，解决"消费慢拖累采集"问题。
+
+```python
+with create_threaded_source("0", warmup_frames=30) as src:
+    for frame in src:
+        results = model(frame.image)
+```
+
+---
+
+## 11. Agent 智能助手系统
+
+### 11.1 架构设计
+
+Agent 系统采用**关键词路由 + 本地工具执行 + LLM 排版**的三层架构：
+
+```
+用户消息
+  │
+  ▼
+┌─────────────────────┐
+│  Intent Router      │  关键词正则匹配（不依赖 LLM）
+│  模型→list_models   │
+│  数据集→list_datasets│
+│  实验→list_experiments│
+│  推理/检测→run_inference│
+│  GPU/显存→get_gpu_info│
+└─────────────────────┘
+  │
+  ├── 匹配 → 本地执行工具 → 原始数据
+  │                       │
+  │                       ▼
+  │               ┌──────────────────┐
+  │               │  LLM 排版美化    │  → 自然语言回复
+  │               └──────────────────┘
+  │
+  └── 未匹配 → 普通 LLM 对话
+```
+
+### 11.2 为什么不用 LLM function calling？
+
+`deepseek-v4-flash` 对 OpenAI 格式的 function calling 支持不稳定，经常忽略 tools 参数直接当成普通聊天。改用关键词路由后：
+
+- **100% 可靠**：工具执行完全不依赖 LLM
+- **即时响应**：本地执行，无需等 LLM 返回工具调用
+- **低消耗**：不浪费 token 在 function calling 上
+- LLM 只负责把结构化数据写成自然语言（一次调用）
+
+### 11.3 可用工具
+
+| 关键词触发 | 函数 | 功能 |
+|---|---|---|
+| 模型/model/.pt/权重 | `tool_list_models()` | 列出所有 .pt 模型+文件大小 |
+| 数据集/dataset | `tool_list_datasets()` | 列出所有数据集 YAML |
+| 实验/训练/exp | `tool_list_experiments()` | 列出实验 + best mAP50 |
+| 推理/检测+路径 | `tool_run_inference()` | 对图片执行 YOLO 推理 |
+| GPU/显存/cuda | `tool_get_gpu_info()` | GPU 显存使用状态 |
+
+### 11.4 路径自动解析
+
+推理检测时，Agent 自动从用户消息中提取路径：
+
+```
+用户说："用data/models/checkpoints/best_rsod.pt检测这张图C:\test\image.jpg"
+                                      └──── model_path ────┘ └─── image_path ──┘
+```
+
+支持 Windows 路径 (`C:\...`) 和 Linux 路径 (`/...`)，以及模糊匹配（说模型名自动查找）。
+
+---
+
+## 12. 配置管理详解
+
+### 12.1 配置层级
+
+ODPlatform 支持四层配置覆盖（优先级从高到低）：
+
+```
+1. CLI 参数         --epochs 200 --batch 32      ← 最高优先级
+2. 配置文件 YAML    configs/train_config.yaml
+3. 环境变量         ODP_EPOCHS=200
+4. 默认值           ExperimentConfig 字段默认值
+```
+
+### 12.2 配置快照
+
+每次训练自动保存配置快照：
+
+```
+data/runs/experiments/<实验名>/config_snapshot.json
+data/runs/run_config/<实验名>/config_snapshot.json
+data/runs/run_config/<实验名>/config_report.json
+```
+
+可以随时恢复历史快照：
+
+```bash
+odp-config snapshot restore --snapshot runs/config_snapshots/<name>.yaml
+```
+
+### 12.3 配置溯源 (trace)
+
+查看每个配置字段的来源层级：
+
+```bash
+odp-config trace --config configs/train_config.yaml
+# 输出示例: classes → CLI > env var > default
+```
+
+### 12.4 配置管理架构
+
+```
+config_manager/
+├── registry.py       @config_generator 注册装饰器
+├── service.py        核心调度 (generate/validate/trace/snapshot)
+├── snapshot.py       snapshot 导出与恢复
+├── generator.py      配置生成器基类
+├── validator.py      配置校验器
+├── tracer.py         配置溯源
+└── generators/
+    └── train.py      训练配置生成器
+```
+
+---
+
+## 13. 架构设计原则与演进
+
+### 13.1 核心设计原则
+
+| 原则 | 体现 |
+|------|------|
+| **单一数据源** | 版本号在 `_version.py`，路径在 `paths.py`，常量在 `constants.py` |
+| **渐进演进** | 先 monorepo 后拆服务，避免过度设计 |
+| **幂等保护** | 日志初始化、路径探测、模型加载均可重复调用 |
+| **静默降级** | 后端不可达、文件不存在、GPU 不可用时告警不崩溃 |
+| **fail-fast** | 数据格式不匹配、路径不存在时立即报错，不静默吞错 |
+| **开放-封闭** | factory 注册表模式、config 生成器注册、hook 回调 |
+
+### 13.2 三阶段演进
+
+```
+Stage 0 (D1前)     Stage 1 (当前)         Stage 2 (V1.1)
+┌──────────┐      ┌──────────────┐      ┌──────────────────┐
+│ marker   │  →   │ apps/platform│  →   │ web-backend/     │
+│ paths.py │      │ CLI + WebUI  │      │ web-frontend/    │
+│          │      │ 全功能单服务  │      │ 前后端分离       │
+└──────────┘      └──────────────┘      └──────────────────┘
+```
+
+当前 Stage 1：`apps/platform/` 是单体，CLI 和 WebUI 共用同一套核心库。
+
+### 13.3 跨模块调用规范
+
+```
+common/ (基础层) ← 所有模块依赖，不依赖任何业务模块
+  ├── paths.py        路径探测（.odp-workspace marker）
+  ├── logging_utils.py 日志装配
+  ├── constants.py     常量和枚举
+  └── performance_utils.py 性能工具
+
+业务层依赖链（单向）：
+  data_pipeline → data_validation → training → evaluation → inference
+       ↓               ↓               ↓           ↓            ↓
+      CLI           CLI              CLI         CLI          CLI / WebUI
+```
+
+**禁止**：业务层反向依赖、循环依赖、`sys.path.append` hack（安装模式正常时不需要）。
+
+---
+
+## 14. 答辩 FAQ / 常见架构问题
+
+### Q1: 为什么要用 Monorepo 而不是多仓库？
+
+**A**: Monorepo 的优势：
+- 统一版本管理（一个 pyproject.toml）
+- 跨模块修改原子化（一个 commit 改多个模块）
+- 共享基础设施（common/ 路径/日志/性能工具）
+- 降低 CI/CD 复杂度（一次构建）
+- 适合小团队（5 人以下）协作
+
+后期如果团队扩大，可以拆为独立仓库，当前架构已预留了拆分的接口边界。
+
+### Q2: 路径探测的 `.odp-workspace` marker 机制怎么工作？
+
+**A**: 从当前文件目录向上遍历，寻找包含 `.odp-workspace` 标记文件的目录作为根目录。这样项目可以放在任意路径下，不需要硬编码绝对路径，支持软链接和符号链接。
+
+```python
+def _find_workspace_root(marker=".odp-workspace") -> Path:
+    """从当前文件向上找 marker 文件。"""
+    current = Path(__file__).resolve().parent
+    for parent in current.parents:
+        if (parent / marker).exists():
+            return parent
+    raise FileNotFoundError(f"未找到 {marker} 文件")
+```
+
+### Q3: 为什么 WebUI 支持双模式（用户/管理员）？
+
+**A**: 满足不同角色的使用场景：
+- **用户模式**：面向日常检测操作人员，界面简洁，只有检测/摄像头/模型/对话功能
+- **管理员模式**：面向开发/运维人员，额外提供训练/数据校验/配置管理/模型演示等工具
+- 通过密码切换，无需两套部署
+
+### Q4: Agent 对话中的工具调用和传统 RAG 有什么区别？
+
+**A**: 传统 RAG（检索增强生成）是把问题发给知识库搜索文档，然后把文档片段发给 LLM 生成回答。Agent 的工具调用是直接执行代码获取实时数据：
+
+| | RAG | ODP Agent |
+|---|---|---|
+| 数据源 | 静态文档 | 实时系统状态 |
+| 执行方式 | 向量检索 | 代码执行 |
+| 示例 | "YOLO是什么？" → 搜文档 | "有哪些模型？" → 扫描目录 |
+| 刷新率 | 取决于索引更新 | 每次实时 |
+| 可靠性 | 可能检索到旧信息 | 100% 当前状态 |
+
+### Q5: 训练性能优化做了哪些？
+
+**A**:
+1. **GPU JIT 预热**：`warmup()` 用纯黑图跑一次推理，消除首次 CUDA kernel 编译延迟
+2. **模型缓存**：`_detector_cache` 缓存已加载的模型，切换 Tab 不重新加载
+3. **EarlyStopping**：验证集 mAP 连续 patience 轮不提升时自动停止，节省时间
+4. **AMP 混合精度**：默认开启，减少显存占用 ~40%
+5. **模型扫描缓存**：`list_model_files()` 有 5 秒 TTL，避免频繁扫描磁盘
+
+### Q6: CSV 列名适配器解决什么问题？
+
+**A**: Ultralytics YOLO 在不同版本中可能修改 results.csv 的列名（如 `mAP50(B)` → `mAP50`）。如果代码直接按列名读取，升级 YOLO 会导致图表白屏。项目通过 `_COLUMN_ALIASES` 映射表做兼容：
+
+```python
+_COLUMN_ALIASES = {
+    "metrics/mAP50(B)": "map50",      # YOLOv8 格式
+    "mAP50": "map50",                  # YOLOv11 可能格式
+}
+```
+
+升级 YOLO 只需在映射表中加一行，不需要改业务代码。
+
+### Q7: 摄像头流处理怎么保证实时性？
+
+**A**: 
+- 采用 `create_threaded_source()` 包装，采集线程和消费线程分离
+- 缓冲策略为 `"latest"`（只保留最新帧），不堆积旧帧
+- 支持分辨率切换（640x480 / 1280x720 / 1920x1080）
+- 多后端支持（MSMF / DSHOW），Windows 下自动选择最优后端
+- 资源泄漏防护：`_release_server_camera()` 确保标签页关闭时释放摄像头
+
+### Q8: 配置快照有什么实际用途？
+
+**A**:
+1. **实验复现**：通过快照恢复历史训练配置，精确复现实验结果
+2. **来源追溯**：`odp-config trace` 查看每个字段来自哪个层级
+3. **对比分析**：对比多次实验的配置差异，找出影响指标的关键参数
+4. **回滚保护**：错误配置导致训练失败时，可快速回滚到上次有效配置
+
+### Q9: 后端不可达时系统会崩溃吗？
+
+**A**: 不会。所有后端通信都有重试 + 超时 + 静默降级机制：
+
+```python
+try:
+    requests.post(url, json=payload, timeout=3)
+except requests.RequestException:
+    logger.warning("后端不可达，实验仅保存在本地")
+```
+
+- 训练继续执行，不受后端状态影响
+- 指标保存在本地 CSV 中，后端恢复后可通过脚本同步
+- Dashboard 显示"后端不可用"提示但不阻塞其他功能
+
+### Q10: 出现"CUDA out of memory"怎么办？
+
+**A**: 按优先级尝试：
+1. 降低 `batch` 大小（最有效）
+2. 降低 `imgsz` 图片尺寸
+3. 开启 `--amp` 混合精度（默认已开启）
+4. 使用 `device="cpu"` 回退到 CPU 训练
+5. 调用 `torch.cuda.empty_cache()` 清理缓存
+
+WebUI 训练时会自动检测 GPU 显存并给出建议 batch 值：
+
+```
+检测到 GPU 显存 6 GiB，建议 batch ≤ 4
+```
+
+---
+
+## 15. 学习路线图 (更新版)
+
+### 15.1 按模块优先级学习
 
 | 优先级 | 模块 | 学习目标 | 预计时间 |
 |:------:|------|---------|:--------:|
@@ -453,7 +998,7 @@ odp-backend
 | ⭐ | data_validation/ | 校验+清洗 | 1 小时 |
 | ⭐ | config/ | Pydantic 配置 | 1 小时 |
 
-### 9.2 推荐学习步骤
+### 15.2 推荐学习步骤
 
 **第 1 步：理解基础工具层（common/）**
 - 阅读 [common/paths.py](file:///f:/python_projects/class/ODPlatform/apps/platform/src/odp_platform/common/paths.py) — 路径探测机制
@@ -471,7 +1016,7 @@ odp-backend
 **第 4 步：运行完整流程**
 - 从 `odp-init` → `odp-transform` → `odp-train` → `odp-val` → `odp-infer`
 
-### 9.3 核心代码阅读路径
+### 15.3 核心代码阅读路径
 
 ```
 1. apps/platform/src/odp_platform/common/paths.py       ← 路径是基础
@@ -482,7 +1027,7 @@ odp-backend
 6. apps/platform/tests/                                 ← 测试用例
 ```
 
-### 9.4 自学延伸方向
+### 15.4 自学延伸方向
 
 - **模型优化**：YOLO 模型压缩（剪枝/量化/TensorRT）
 - **Web 服务**：用 FastAPI 封装推理 API
