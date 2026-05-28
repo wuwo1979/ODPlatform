@@ -339,10 +339,7 @@ def _run_server_camera(
     iou: float,
     cam_res: str = "640x480",
 ) -> Any:
-    import contextlib
-    import io
     import os
-    import time as _time
     import warnings
 
     import cv2
@@ -353,50 +350,40 @@ def _run_server_camera(
     _release_server_camera()
     _server_cam_stop.clear()
 
-    os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
+    os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+    os.environ["OBSENSOR_DEBUG"] = "0"
     warnings.filterwarnings("ignore", message=".*obsensor.*")
     warnings.filterwarnings("ignore", message=".*FFMPEG.*")
-    warnings.filterwarnings("ignore", message=".*backend.*")
+
+    backends_to_try = [cv2.CAP_DSHOW]
+    if hasattr(cv2, "CAP_MSMF"):
+        backends_to_try.insert(0, cv2.CAP_MSMF)
 
     cap = None
-    with contextlib.redirect_stderr(io.StringIO()):
-        null_fd = os.open(os.devnull, os.O_WRONLY)
-        orig_stderr = os.dup(2)
-        os.dup2(null_fd, 2)
+    for backend in backends_to_try:
         try:
-            backends = [cv2.CAP_DSHOW]
-            if hasattr(cv2, "CAP_MSMF"):
-                backends.insert(0, cv2.CAP_MSMF)
-            for backend in backends:
-                try:
-                    candidate = cv2.VideoCapture(cam_id, backend)
-                    if candidate.isOpened():
-                        cap = candidate
-                        break
-                    candidate.release()
-                except Exception:
-                    continue
-            if cap is None:
-                try:
-                    candidate = cv2.VideoCapture(cam_id)
-                    if candidate.isOpened():
-                        cap = candidate
-                except Exception:
-                    pass
-        finally:
-            os.dup2(orig_stderr, 2)
-            os.close(null_fd)
-            os.close(orig_stderr)
+            candidate = cv2.VideoCapture(cam_id, backend)
+            if candidate.isOpened():
+                cap = candidate
+                break
+            candidate.release()
+        except Exception:
+            continue
 
     if cap is None:
-        no_cam = np.full((480, 640, 3), (120, 120, 120), dtype=np.uint8)
-        cv2.putText(no_cam, "No Camera Detected", (70, 210),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (220, 220, 220), 2)
-        cv2.putText(no_cam, "Press [Release & Refresh] then [Start]", (50, 260),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1)
+        try:
+            cap = cv2.VideoCapture(cam_id)
+            if not cap.isOpened():
+                cap = None
+        except Exception:
+            cap = None
+
+    if cap is None:
+        blank = np.full((480, 640, 3), 180, dtype=np.uint8)
+        cv2.putText(blank, "No Camera", (190, 240),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (80, 80, 80), 2)
         while not _server_cam_stop.is_set():
-            yield no_cam.copy()
-            _time.sleep(0.5)
+            yield blank
         return
 
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -412,6 +399,7 @@ def _run_server_camera(
     with _server_cap_lock:
         _server_cap_ref[0] = cap
 
+    import time as _time
     frame_count = 0
     fps_timer = _time.time()
     fps_samples = []
