@@ -4,11 +4,14 @@ import csv
 import io
 import json
 import logging
+import tempfile
 import threading
+import time as _time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import cv2
 import gradio as gr
 import matplotlib
 matplotlib.use("Agg")
@@ -560,73 +563,45 @@ def _run_video_detection(
     max_frames: int,
 ) -> tuple:
     if not video_path or not model_path:
-        return [], "请上传视频并选择模型", [], {}
+        return [], "请上传视频并选择模型", [], {}, ""
 
     try:
-        import os
-        import time as _time
-
-        import cv2
-        import numpy as np
-
         from odp_platform.inference.visualizer import draw_detections
     except ImportError as exc:
-        return [], f"依赖未就绪: {exc}", [], {}
+        return [], f"依赖未就绪: {exc}", [], {}, ""
 
     try:
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
-            return [], f"无法打开视频: {video_path}", [], {}
+            return [], f"无法打开视频: {video_path}", [], {}, ""
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
         cap.release()
 
         if max_frames > 0:
             total_frames = min(total_frames, max_frames)
 
+        detector = _get_or_create_detector(model_path, conf, iou)
+        if detector is None:
+            return [], "模型加载失败", [], {}, ""
+
+        out_temp = Path(tempfile.mkdtemp(prefix="odp_video_"))
+        out_video_path = str(out_temp / "output.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        out_fps = max(1.0, fps / max(frame_interval, 1))
+        video_writer = cv2.VideoWriter(out_video_path, fourcc, out_fps, (w, h))
+
+        cap = cv2.VideoCapture(video_path)
+        frame_idx = 0
         processed_count = 0
         total_objs = 0
         total_infer_ms = 0.0
         sample_frames = []
         class_totals: dict[str, int] = {}
         frame_details = []
-
-        # Use InferenceService for multi-threaded processing
-        try:
-            from odp_platform.inference import InferService
-            service = InferService()
-            result_obj = service.predict(
-                yaml_path=None,
-                cli_args={
-                    "source": video_path,
-                    "model": model_path,
-                    "conf": conf,
-                    "iou": iou,
-                    "save": False,
-                    "show": False,
-                },
-                beautify=False,
-                threaded=False,
-                show_info=False,
-            )
-            status = f"视频处理完成 | 耗时: {result_obj.infer_time:.1f}s | 输出: {result_obj.output_dir}"
-            return [], status, [], {}
-        except ImportError:
-            pass
-        except Exception as exc:
-            logger.warning("InferService 处理失败，回退到逐帧模式: %s", exc)
-
-        # Fallback: frame-by-frame with cv2
-        detector = _get_or_create_detector(model_path, conf, iou)
-        if detector is None:
-            return [], "模型加载失败", [], {}
-
-        cap = cv2.VideoCapture(video_path)
-        frame_idx = 0
         t_start = _time.time()
 
         while True:
@@ -652,7 +627,7 @@ def _run_video_detection(
                     class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
                 total_objs += len(result.detections)
 
-                if len(sample_frames) < 2000:
+                if len(sample_frames) < 500:
                     sample_frames.append(rendered)
 
                 frame_details.append({
@@ -662,9 +637,13 @@ def _run_video_detection(
                     "类别": ", ".join(f"{k}:{v}" for k, v in classes_in_frame.items()) if classes_in_frame else "-",
                 })
 
+                rendered_bgr = cv2.cvtColor(rendered, cv2.COLOR_RGB2BGR)
+                video_writer.write(rendered_bgr)
+
             frame_idx += 1
 
         cap.release()
+        video_writer.release()
         elapsed_total = _time.time() - t_start
         avg_ms = total_infer_ms / max(processed_count, 1)
 
@@ -681,11 +660,11 @@ def _run_video_detection(
         }
         status = (f"完成: {processed_count}/{frame_idx} 帧 | {total_objs} 个目标 | "
                   f"平均 {avg_ms:.0f}ms/帧 | 等效FPS: {processed_count/max(elapsed_total,0.001):.1f}")
-        return sample_frames, status, frame_details, summary
+        return sample_frames, status, frame_details, summary, out_video_path
 
     except Exception as exc:
         logger.exception("视频检测失败")
-        return [], f"视频检测失败: {exc}", [], {}
+        return [], f"视频检测失败: {exc}", [], {}, ""
 
 
 def create_single_detection_ui() -> None:
@@ -819,6 +798,7 @@ def create_video_detection_ui() -> None:
             video_status = gr.Textbox(
                 label="状态", value="等待视频", interactive=False, max_lines=2
             )
+            video_download = gr.File(label="下载结果视频")
         with gr.Column(scale=2):
             video_gallery = gr.Gallery(
                 label="检测结果预览", columns=4, height=480,
@@ -837,7 +817,7 @@ def create_video_detection_ui() -> None:
     detect_btn.click(
         fn=_run_video_detection,
         inputs=[video_in, model_dd, conf_slider, iou_slider, frame_interval, max_frames],
-        outputs=[video_gallery, video_status, video_detail, video_summary],
+        outputs=[video_gallery, video_status, video_detail, video_summary, video_download],
     )
 
 
