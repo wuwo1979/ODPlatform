@@ -20,11 +20,12 @@ from odp_platform.webui.dataset_browser import create_dataset_browser_ui
 from odp_platform.webui.model_demo import create_model_demo_ui
 from odp_platform.webui.training_tab import create_training_ui
 from odp_platform.webui.user_tabs import (
-    create_detection_results_ui,
-    create_image_detection_ui,
-    create_llm_chat_ui,
+    create_single_detection_ui,
+    create_folder_detection_ui,
+    create_video_detection_ui,
+    create_live_camera_ui,
     create_model_selection_ui,
-    create_user_info_ui,
+    create_llm_chat_ui,
 )
 from odp_platform.webui.validation_tab import create_validation_ui
 
@@ -1290,24 +1291,32 @@ button:has(svg[data-testid="FullscreenIcon"]) {
 
 def _create_user_tabs() -> None:
     with gr.Tabs():
-        with gr.TabItem("图像检测"):
-            create_image_detection_ui()
-        with gr.TabItem("检测结果"):
-            create_detection_results_ui()
+        with gr.TabItem("单图检测"):
+            create_single_detection_ui()
+        with gr.TabItem("文件夹检测"):
+            create_folder_detection_ui()
+        with gr.TabItem("视频检测"):
+            create_video_detection_ui()
+        with gr.TabItem("实时摄像头"):
+            create_live_camera_ui()
         with gr.TabItem("模型选择"):
             create_model_selection_ui()
         with gr.TabItem("LLM对话"):
             create_llm_chat_ui()
-        with gr.TabItem("用户信息"):
-            create_user_info_ui()
 
 
 def _create_admin_tabs() -> None:
     with gr.Tabs():
         with gr.TabItem("Dashboard"):
             create_dashboard_ui()
-        with gr.TabItem("图像检测"):
-            create_image_detection_ui()
+        with gr.TabItem("单图检测"):
+            create_single_detection_ui()
+        with gr.TabItem("文件夹检测"):
+            create_folder_detection_ui()
+        with gr.TabItem("视频检测"):
+            create_video_detection_ui()
+        with gr.TabItem("实时摄像头"):
+            create_live_camera_ui()
         with gr.TabItem("模型选择"):
             create_model_selection_ui()
         with gr.TabItem("模型演示"):

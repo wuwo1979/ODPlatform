@@ -551,7 +551,177 @@ def _clear_chat() -> tuple[list[dict[str, str]], str]:
     return [], ""
 
 
-def create_image_detection_ui() -> None:
+def _run_video_detection(
+    video_path: str,
+    model_path: str,
+    conf: float,
+    iou: float,
+    frame_interval: int,
+    max_frames: int,
+) -> tuple:
+    if not video_path or not model_path:
+        return [], "请上传视频并选择模型", [], {}, 0
+
+    try:
+        import os
+        import time as _time
+
+        import cv2
+        import numpy as np
+
+        from odp_platform.inference.visualizer import draw_detections
+    except ImportError as exc:
+        return [], f"依赖未就绪: {exc}", [], {}, 0
+
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return [], f"无法打开视频: {video_path}", [], {}, 0
+
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        cap.release()
+
+        if max_frames > 0:
+            total_frames = min(total_frames, max_frames)
+
+        processed_count = 0
+        total_objs = 0
+        total_infer_ms = 0.0
+        sample_frames = []
+        class_totals: dict[str, int] = {}
+        frame_details = []
+
+        # Use InferenceService for multi-threaded processing
+        try:
+            from odp_platform.inference import InferService
+            service = InferService()
+            result_obj = service.predict(
+                yaml_path=None,
+                cli_args={
+                    "source": video_path,
+                    "model": model_path,
+                    "conf": conf,
+                    "iou": iou,
+                    "save": False,
+                    "show": False,
+                },
+                beautify=False,
+                threaded=False,
+                show_info=False,
+            )
+            status = f"视频处理完成 | 耗时: {result_obj.infer_time:.1f}s | 输出: {result_obj.output_dir}"
+            return [], status, [], {}, 0
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.warning("InferService 处理失败，回退到逐帧模式: %s", exc)
+
+        # Fallback: frame-by-frame with cv2
+        detector = _get_or_create_detector(model_path, conf, iou)
+        if detector is None:
+            return [], "模型加载失败", [], {}, 0
+
+        cap = cv2.VideoCapture(video_path)
+        frame_idx = 0
+        t_start = _time.time()
+
+        while True:
+            ret, frame_bgr = cap.read()
+            if not ret:
+                break
+            if max_frames > 0 and frame_idx >= max_frames:
+                break
+
+            if frame_idx % frame_interval == 0:
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                t0 = _time.time()
+                result = detector.detect(frame_rgb)
+                elapsed_ms = (_time.time() - t0) * 1000
+
+                rendered = draw_detections(frame_rgb, result.detections)
+                processed_count += 1
+                total_infer_ms += elapsed_ms
+
+                classes_in_frame = {}
+                for d in result.detections:
+                    classes_in_frame[d.class_name] = classes_in_frame.get(d.class_name, 0) + 1
+                    class_totals[d.class_name] = class_totals.get(d.class_name, 0) + 1
+                total_objs += len(result.detections)
+
+                if len(sample_frames) < 20:
+                    sample_frames.append(rendered)
+
+                frame_details.append({
+                    "帧": frame_idx,
+                    "目标数": len(result.detections),
+                    "耗时(ms)": round(elapsed_ms, 1),
+                    "类别": ", ".join(f"{k}:{v}" for k, v in classes_in_frame.items()) if classes_in_frame else "-",
+                })
+
+            frame_idx += 1
+
+        cap.release()
+        elapsed_total = _time.time() - t_start
+        avg_ms = total_infer_ms / max(processed_count, 1)
+
+        summary = {
+            "总帧数": frame_idx,
+            "处理帧数": processed_count,
+            "跳帧间隔": frame_interval,
+            "总目标数": total_objs,
+            "推理总耗时(ms)": round(total_infer_ms, 1),
+            "平均每帧(ms)": round(avg_ms, 1),
+            "实际耗时(s)": round(elapsed_total, 1),
+            "等效FPS": round(processed_count / max(elapsed_total, 0.001), 1),
+            "类别分布": class_totals,
+        }
+        status = (f"完成: {processed_count}/{frame_idx} 帧 | {total_objs} 个目标 | "
+                  f"平均 {avg_ms:.0f}ms/帧 | 等效FPS: {processed_count/max(elapsed_total,0.001):.1f}")
+        return sample_frames, status, frame_details, summary, processed_count
+
+    except Exception as exc:
+        logger.exception("视频检测失败")
+        return [], f"视频检测失败: {exc}", [], {}, 0
+
+
+def create_single_detection_ui() -> None:
+    models = _model_choices()
+    detector_state = gr.State(None)
+
+    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+        model_dd = gr.Dropdown(
+            choices=models,
+            value=models[0] if models else None,
+            label="模型",
+            filterable=True,
+            interactive=True,
+        )
+        refresh_btn = gr.Button("刷新")
+        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
+        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+
+    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+        with gr.Column(scale=1):
+            image_in = gr.Image(type="numpy", label="上传图片", sources=["upload"])
+            detect_btn = gr.Button("开始检测", variant="primary", size="lg")
+        with gr.Column(scale=1):
+            image_out = gr.Image(type="numpy", label="检测结果", container=True)
+    status = gr.Textbox(label="状态", value="等待检测", interactive=False, max_lines=1)
+    result_json = gr.JSON(label="检测列表")
+
+    refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
+    detect_btn.click(
+        fn=_run_single_detection,
+        inputs=[image_in, model_dd, conf_slider, iou_slider, detector_state],
+        outputs=[image_out, result_json, status, detector_state],
+    )
+
+
+def create_folder_detection_ui() -> None:
     models = _model_choices()
     detector_state = gr.State(None)
     folder_results_state = gr.State([])
@@ -568,119 +738,136 @@ def create_image_detection_ui() -> None:
         conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
         iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
 
-    mode_radio = gr.Radio(
-        choices=["单图检测", "文件夹检测"],
-        value="单图检测",
-        label="检测模式",
-        interactive=True,
-        elem_classes=["odp-mode-radio"],
-    )
-
-    # ========== 单图检测区域 ==========
-    with gr.Column(visible=True, elem_classes=["odp-single-mode"]) as single_col:
-        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-            with gr.Column(scale=1):
-                image_in = gr.Image(type="numpy", label="上传图片", sources=["upload"])
-                detect_btn = gr.Button("开始检测", variant="primary", size="lg")
-            with gr.Column(scale=1):
-                image_out = gr.Image(type="numpy", label="检测结果", container=True)
-        status = gr.Textbox(label="状态", value="等待检测", interactive=False, max_lines=1)
-        result_json = gr.JSON(label="检测列表")
-
-    # ========== 文件夹检测区域 ==========
-    with gr.Column(visible=False, elem_classes=["odp-folder-mode"]) as folder_col:
-        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-            with gr.Column(scale=1):
-                folder_in = gr.Textbox(
-                    label="图片文件夹路径",
-                    placeholder="eg. F:/datasets/test_images",
-                    max_lines=1,
-                )
-                output_dir = gr.Textbox(
-                    label="输出目录（可选）",
-                    placeholder="留空默认 outputs/detect",
-                    max_lines=1,
-                )
-                folder_detect_btn = gr.Button("处理文件夹", variant="primary", size="lg")
-                folder_status = gr.Textbox(
-                    label="状态", value="等待处理", interactive=False, max_lines=1
-                )
-            with gr.Column(scale=2):
-                folder_gallery = gr.Gallery(
-                    label="文件夹检测结果", columns=3, height=480,
-                    object_fit="contain",
-                )
-        with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
-            folder_summary = gr.JSON(label="统计摘要", value={})
-            folder_detail = gr.Dataframe(
-                label="检测明细",
-                headers=["文件名", "检测数", "类别", "平均置信度", "耗时(ms)"],
-                value=[],
-                interactive=False,
-                wrap=True,
-                max_rows=10,
-            )
-
-    # ========== 模式切换 ==========
-    mode_radio.change(
-        fn=lambda m: (
-            gr.update(visible=m == "单图检测"),
-            gr.update(visible=m == "文件夹检测"),
-        ),
-        inputs=[mode_radio],
-        outputs=[single_col, folder_col],
-    )
-
-    # ========== 实时摄像头检测（始终显示） ==========
-    gr.Markdown("---")
-    gr.Markdown("### 实时摄像头检测")
-    webcam_status = gr.Textbox(
-        label="摄像头状态",
-        value="点击上方摄像头画面激活",
-        max_lines=1,
-        interactive=False,
-    )
-    gr.Markdown(
-        "💡 **使用说明**：① 点击上方「摄像头」画面  ② 浏览器弹出权限请求时点击「允许」  "
-        "③ 画面出现后自动开始逐帧推理。"
-    )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        webcam_in = gr.Image(sources="webcam", type="numpy", label="摄像头")
-        webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
-
-    with gr.Accordion("服务器摄像头（OpenCV）", open=False):
-        gr.Markdown(
-            "服务器端直接通过 OpenCV 读取摄像头，不依赖浏览器 MediaDevices。"
-        )
-        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-            cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10)
-            server_cam_status = gr.Textbox(
-                label="状态", value="未启动", interactive=False, max_lines=1
+        with gr.Column(scale=1):
+            folder_in = gr.Textbox(
+                label="图片文件夹路径",
+                placeholder="eg. F:/datasets/test_images",
+                max_lines=1,
             )
-        with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-            start_server_cam_btn = gr.Button("启动服务器摄像头", variant="primary")
-            stop_server_cam_btn = gr.Button("停止服务器摄像头", variant="stop")
-            refresh_server_cam_btn = gr.Button("释放并刷新摄像头", variant="secondary")
-        gpu_info_box = gr.Textbox(
-            label="GPU 显存", value="", interactive=False, max_lines=2
+            output_dir = gr.Textbox(
+                label="输出目录（可选）",
+                placeholder="留空默认不保存",
+                max_lines=1,
+            )
+            folder_detect_btn = gr.Button("处理文件夹", variant="primary", size="lg")
+            folder_status = gr.Textbox(
+                label="状态", value="等待处理", interactive=False, max_lines=1
+            )
+        with gr.Column(scale=2):
+            folder_gallery = gr.Gallery(
+                label="文件夹检测结果", columns=3, height=480,
+                object_fit="contain",
+            )
+    with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
+        folder_summary = gr.JSON(label="统计摘要", value={})
+        folder_detail = gr.Dataframe(
+            label="检测明细",
+            headers=["文件名", "检测数", "类别", "平均置信度", "耗时(ms)"],
+            value=[],
+            interactive=False,
+            wrap=True,
+            max_rows=10,
         )
-        server_cam_out = gr.Image(streaming=True, label="服务器摄像头实时检测结果", container=True)
 
-    # ========== 事件绑定 ==========
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
-
-    detect_btn.click(
-        fn=_run_single_detection,
-        inputs=[image_in, model_dd, conf_slider, iou_slider, detector_state],
-        outputs=[image_out, result_json, status, detector_state],
-    )
-
     folder_detect_btn.click(
         fn=_run_folder_detection_wrapped,
         inputs=[folder_in, output_dir, model_dd, conf_slider, iou_slider, detector_state],
         outputs=[folder_gallery, folder_status, detector_state, folder_summary, folder_detail, folder_results_state],
     )
 
+
+def create_video_detection_ui() -> None:
+    models = _model_choices()
+
+    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+        model_dd = gr.Dropdown(
+            choices=models,
+            value=models[0] if models else None,
+            label="模型",
+            filterable=True,
+            interactive=True,
+        )
+        refresh_btn = gr.Button("刷新")
+        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
+        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+
+    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+        with gr.Column(scale=1):
+            video_in = gr.Video(label="上传视频文件", sources=["upload"])
+            with gr.Row():
+                frame_interval = gr.Slider(1, 30, 5, step=1, label="跳帧间隔（每N帧检测一次）")
+                max_frames = gr.Slider(100, 5000, 1000, step=100, label="最大处理帧数")
+            detect_btn = gr.Button("开始检测", variant="primary", size="lg")
+            video_status = gr.Textbox(
+                label="状态", value="等待视频", interactive=False, max_lines=2
+            )
+        with gr.Column(scale=2):
+            video_gallery = gr.Gallery(
+                label="检测结果抽样（最多20帧）", columns=4, height=480,
+                object_fit="contain",
+            )
+    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+        video_summary = gr.JSON(label="统计摘要", value={})
+        video_detail = gr.Dataframe(
+            label="逐帧明细",
+            headers=["帧", "目标数", "耗时(ms)", "类别"],
+            value=[],
+            interactive=False,
+            wrap=True,
+            max_rows=15,
+        )
+
+    refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
+    detect_btn.click(
+        fn=_run_video_detection,
+        inputs=[video_in, model_dd, conf_slider, iou_slider, frame_interval, max_frames],
+        outputs=[video_gallery, video_status, video_detail, video_summary, gr.Progress()],
+    )
+
+
+def create_live_camera_ui() -> None:
+    models = _model_choices()
+
+    with gr.Row(elem_classes=["odp-row", "odp-row-four"]):
+        model_dd = gr.Dropdown(
+            choices=models,
+            value=models[0] if models else None,
+            label="模型",
+            filterable=True,
+            interactive=True,
+        )
+        refresh_btn = gr.Button("刷新")
+        conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
+        iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
+
+    gr.Markdown("### Web 摄像头（浏览器端）")
+    gr.Markdown(
+        "💡 点击下方摄像头画面，浏览器弹出权限请求时点击「允许」，画面出现后自动开始逐帧推理。"
+    )
+    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+        webcam_in = gr.Image(sources="webcam", type="numpy", label="摄像头")
+        webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
+
+    gr.Markdown("---")
+    gr.Markdown("### 服务器摄像头（OpenCV）")
+    gr.Markdown("服务器端直接通过 OpenCV 读取摄像头，不依赖浏览器。")
+    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+        cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10)
+        server_cam_status = gr.Textbox(
+            label="状态", value="未启动", interactive=False, max_lines=1
+        )
+    with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
+        start_server_cam_btn = gr.Button("启动", variant="primary")
+        stop_server_cam_btn = gr.Button("停止", variant="stop")
+        refresh_server_cam_btn = gr.Button("释放并刷新", variant="secondary")
+    gpu_info_box = gr.Textbox(
+        label="GPU 显存", value="", interactive=False, max_lines=2
+    )
+    server_cam_out = gr.Image(streaming=True, label="服务器摄像头实时检测结果", container=True)
+
+    refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
     webcam_in.stream(
         fn=_process_webcam_frame,
         inputs=[webcam_in, model_dd, conf_slider, iou_slider],
@@ -689,21 +876,20 @@ def create_image_detection_ui() -> None:
         stream_every=0.3,
         concurrency_limit=5,
     )
-
     start_server_cam_btn.click(
         fn=_run_server_camera,
         inputs=[cam_id, model_dd, conf_slider, iou_slider],
         outputs=[server_cam_out],
     )
     stop_server_cam_btn.click(
-        fn=lambda: (_release_server_camera(), "摄像头已停止")[1],
+        fn=lambda: (_release_server_camera(), "已停止")[1],
         outputs=[server_cam_status],
     )
     refresh_server_cam_btn.click(
         fn=lambda: (_release_server_camera(), _gpu_info())[1],
         outputs=[gpu_info_box],
     ).then(
-        fn=lambda: "摄像头已释放，可重新启动",
+        fn=lambda: "已释放，可重新启动",
         outputs=[server_cam_status],
     )
 
