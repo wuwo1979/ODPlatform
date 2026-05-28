@@ -243,20 +243,23 @@ def create_experiment_viz_ui() -> None:
         )
         refresh_btn = gr.Button("刷新", scale=1)
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        summary_box = gr.Textbox(label="实验摘要", lines=8, interactive=False)
+    summary_box = gr.Textbox(label="实验摘要", lines=6, interactive=False)
 
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        results_plot = gr.Image(value=blank, label="训练曲线 (Loss + mAP)", container=True)
-        confusion_plot = gr.Image(value=blank, label="混淆矩阵", container=True)
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        confusion_norm_plot = gr.Image(value=blank, label="归一化混淆矩阵", container=True)
-        labels_plot = gr.Image(value=blank, label="类别分布", container=True)
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        pr_plot = gr.Image(value=blank, label="PR 曲线", container=True)
-        f1_plot = gr.Image(value=blank, label="F1 曲线", container=True)
-    with gr.Row(elem_classes=["odp-row"]):
-        bar_plot = gr.Image(value=blank, label="最佳指标柱状图", container=True)
+    with gr.Tabs():
+        with gr.TabItem("训练曲线"):
+            results_plot = gr.Image(value=blank, label="Loss + 验证指标", container=True, height=400)
+            bar_plot = gr.Image(value=blank, label="最佳指标柱状图", container=True, height=350)
+
+        with gr.TabItem("评估矩阵"):
+            with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+                confusion_plot = gr.Image(value=blank, label="混淆矩阵", container=True, height=400)
+                confusion_norm_plot = gr.Image(value=blank, label="归一化混淆矩阵", container=True, height=400)
+            with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
+                pr_plot = gr.Image(value=blank, label="PR 曲线", container=True, height=350)
+                f1_plot = gr.Image(value=blank, label="F1 曲线", container=True, height=350)
+
+        with gr.TabItem("类别分布"):
+            labels_plot = gr.Image(value=blank, label="类别分布", container=True, height=450)
 
     refresh_btn.click(
         fn=_refresh_experiments,
@@ -270,9 +273,4 @@ def create_experiment_viz_ui() -> None:
             results_plot, confusion_plot, confusion_norm_plot,
             labels_plot, pr_plot, f1_plot, bar_plot, summary_box,
         ],
-    ).then(
-        fn=None,
-        js=None,
-        inputs=None,
-        outputs=None,
     )

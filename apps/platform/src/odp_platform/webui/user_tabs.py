@@ -320,47 +320,12 @@ def _run_folder_detection_wrapped(
     return results, status, detector, summary, detail_rows, detail_rows
 
 
-def _process_webcam_frame(
-    frame: Any,
-    model_path: str,
-    conf: float,
-    iou: float,
-) -> Any:
-    if frame is None or not model_path:
-        return frame
-    try:
-        import numpy as np
-
-        from odp_platform.inference.visualizer import draw_detections
-    except ImportError:
-        logger.error("webcam: 推理依赖未就绪")
-        return frame
-
-    try:
-        if isinstance(frame, np.ndarray):
-            image_np = frame
-        else:
-            image_np = np.array(frame)
-        if image_np.size == 0 or image_np.ndim not in {2, 3}:
-            return frame
-
-        detector = _get_or_create_detector(model_path, conf, iou)
-        if detector is None:
-            return frame
-
-        result = detector.detect(image_np)
-        rendered = draw_detections(image_np, result.detections)
-        return rendered
-    except Exception as exc:
-        logger.warning("webcam 流检测帧失败: %s", exc)
-        return frame
-
-
 def _run_server_camera(
     cam_id: int,
     model_path: str,
     conf: float,
     iou: float,
+    cam_res: str = "640x480",
 ) -> Any:
     import os
     import warnings
@@ -404,8 +369,14 @@ def _run_server_camera(
             return
 
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+    try:
+        res_parts = [int(x) for x in cam_res.split("x")]
+        if len(res_parts) == 2:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, res_parts[0])
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, res_parts[1])
+    except Exception:
+        pass
 
     with _server_cap_lock:
         _server_cap_ref[0] = cap
@@ -837,22 +808,16 @@ def create_live_camera_ui() -> None:
         refresh_btn = gr.Button("刷新")
         conf_slider = gr.Slider(0.01, 0.99, 0.25, step=0.01, label="Confidence")
         iou_slider = gr.Slider(0.01, 0.99, 0.45, step=0.01, label="IoU")
-
-    gr.Markdown("### Web 摄像头（浏览器端）")
-    gr.Markdown(
-        "💡 摄像头画面实时显示检测结果，无需手动拍照。"
-    )
     with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        webcam_in = gr.Image(sources="webcam", type="numpy", streaming=True, label="摄像头")
-        webcam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
-
-    gr.Markdown("---")
-    gr.Markdown("### 服务器摄像头（OpenCV）")
-    gr.Markdown("服务器端直接通过 OpenCV 读取摄像头，不依赖浏览器。")
-    with gr.Row(elem_classes=["odp-row", "odp-row-two"]):
-        cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10)
+        cam_id = gr.Number(label="摄像头 ID", value=0, precision=0, minimum=0, maximum=10, scale=1)
+        cam_res = gr.Dropdown(
+            label="分辨率",
+            choices=["640x480", "1280x720", "1920x1080"],
+            value="640x480",
+            scale=1,
+        )
         server_cam_status = gr.Textbox(
-            label="状态", value="未启动", interactive=False, max_lines=1
+            label="状态", value="未启动", interactive=False, max_lines=1, scale=2
         )
     with gr.Row(elem_classes=["odp-row", "odp-row-three"]):
         start_server_cam_btn = gr.Button("启动", variant="primary")
@@ -861,20 +826,12 @@ def create_live_camera_ui() -> None:
     gpu_info_box = gr.Textbox(
         label="GPU 显存", value="", interactive=False, max_lines=2
     )
-    server_cam_out = gr.Image(streaming=True, label="服务器摄像头实时检测结果", container=True)
+    server_cam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
-    webcam_in.stream(
-        fn=_process_webcam_frame,
-        inputs=[webcam_in, model_dd, conf_slider, iou_slider],
-        outputs=[webcam_out],
-        time_limit=300,
-        stream_every=0.3,
-        concurrency_limit=5,
-    )
     start_server_cam_btn.click(
         fn=_run_server_camera,
-        inputs=[cam_id, model_dd, conf_slider, iou_slider],
+        inputs=[cam_id, model_dd, conf_slider, iou_slider, cam_res],
         outputs=[server_cam_out],
     )
     stop_server_cam_btn.click(
