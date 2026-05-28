@@ -573,15 +573,22 @@ def create_training_ui() -> None:
 
     with gr.Tabs():
         with gr.TabItem("训练曲线"):
-            exp_results = gr.Image(value=blank, label="Loss + 验证指标", container=True, height=380)
-            exp_bar = gr.Image(value=blank, label="最佳指标柱状图", container=True, height=300)
+            with gr.Row():
+                exp_results = gr.Image(value=blank, label="Loss + 验证指标", container=True, height=380)
+            with gr.Row():
+                exp_bar = gr.Image(value=blank, label="最佳指标柱状图", container=True, height=300)
         with gr.TabItem("评估矩阵"):
-            exp_confusion = gr.Image(value=blank, label="混淆矩阵", container=True, height=340)
-            exp_confusion_norm = gr.Image(value=blank, label="归一化混淆矩阵", container=True, height=340)
-            exp_pr = gr.Image(value=blank, label="PR 曲线", container=True, height=300)
-            exp_f1 = gr.Image(value=blank, label="F1 曲线", container=True, height=300)
+            with gr.Row():
+                exp_confusion = gr.Image(value=blank, label="混淆矩阵", container=True, height=340)
+            with gr.Row():
+                exp_confusion_norm = gr.Image(value=blank, label="归一化混淆矩阵", container=True, height=340)
+            with gr.Row():
+                exp_pr = gr.Image(value=blank, label="PR 曲线", container=True, height=300)
+            with gr.Row():
+                exp_f1 = gr.Image(value=blank, label="F1 曲线", container=True, height=300)
         with gr.TabItem("类别分布"):
-            exp_labels = gr.Image(value=blank, label="类别分布", container=True, height=400)
+            with gr.Row():
+                exp_labels = gr.Image(value=blank, label="类别分布", container=True, height=400)
 
     refresh_exp_btn.click(
         fn=lambda: gr.update(choices=_list_experiments()),

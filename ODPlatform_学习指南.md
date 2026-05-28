@@ -41,6 +41,7 @@ ODPlatform/
 │       ├── training/            模型训练
 │       ├── evaluation/          模型评估
 │       ├── inference/           模型推理
+│       ├── webui/               Gradio 可视化前端（用户+管理员双模式）
 │       └── cli/                 命令行入口
 ├── pyproject.toml           ← 顶层 workspace 配置
 ├── data/                    ← 数据集（已 gitignore）
@@ -390,9 +391,55 @@ docs/architecture/
 
 ---
 
-## 8. 学习路线图
+## 8. WebUI 可视化前端
 
-### 8.1 按模块优先级学习
+### 8.1 双模式设计
+
+ODPlatform 的 Gradio Web 界面分为**用户模式**和**管理员模式**：
+
+- **用户模式**：面向日常检测使用，包含 6 个 Tab
+  - 单图检测 / 文件夹检测 / 视频检测 / 实时摄像头 / 模型选择 / LLM对话
+- **管理员模式**：点击齿轮图标输入密码进入，额外包含 Dashboard / 模型演示 / 数据集浏览 / 训练 / 数据校验 / 配置管理
+
+### 8.2 模型选择与实验可视化
+
+模型选择 Tab 支持：
+- 从 `data/models/checkpoints/` 自动扫描 `.pt` 文件
+- 上传自定义 `.pt` 模型
+- 手动输入模型路径
+- **实验训练结果**：折叠面板展开后，展示训练曲线、混淆矩阵、PR/F1 曲线、类别分布
+
+### 8.3 核心源文件
+
+| 文件 | 职责 |
+|------|------|
+| `webui/app.py` | Gradio 应用入口，组装配件 + 启动后端 |
+| `webui/user_tabs.py` | 用户模式所有 Tab（检测/摄像头/模型/LLM）+ 实验可视化 |
+| `webui/training_tab.py` | 管理员训练 Tab |
+| `webui/dashboard.py` | 管理员 Dashboard |
+| `webui/config_tab.py` | 配置管理 Tab |
+| `webui/validation_tab.py` | 数据校验 Tab |
+| `webui/model_demo.py` | 模型演示 Tab |
+| `webui/dataset_browser.py` | 数据集浏览 Tab |
+| `webui/utils.py` | 工具函数（模型扫描、图片列表等） |
+
+### 8.4 启动方式
+
+```bash
+# 完整 WebUI（含后端）
+odp-webui
+
+# 仅后端
+odp-backend
+```
+
+访问 http://localhost:7860
+
+---
+
+## 9. 学习路线图
+
+### 9.1 按模块优先级学习
 
 | 优先级 | 模块 | 学习目标 | 预计时间 |
 |:------:|------|---------|:--------:|
@@ -402,10 +449,11 @@ docs/architecture/
 | ⭐⭐ | training/ | 训练配置+启动 | 2 小时 |
 | ⭐⭐ | evaluation/ | 评估指标+报表 | 1 小时 |
 | ⭐⭐ | inference/ | 推理+结果输出 | 1 小时 |
+| ⭐⭐ | webui/ | Gradio 前端界面 | 2 小时 |
 | ⭐ | data_validation/ | 校验+清洗 | 1 小时 |
 | ⭐ | config/ | Pydantic 配置 | 1 小时 |
 
-### 8.2 推荐学习步骤
+### 9.2 推荐学习步骤
 
 **第 1 步：理解基础工具层（common/）**
 - 阅读 [common/paths.py](file:///f:/python_projects/class/ODPlatform/apps/platform/src/odp_platform/common/paths.py) — 路径探测机制
@@ -423,7 +471,7 @@ docs/architecture/
 **第 4 步：运行完整流程**
 - 从 `odp-init` → `odp-transform` → `odp-train` → `odp-val` → `odp-infer`
 
-### 8.3 核心代码阅读路径
+### 9.3 核心代码阅读路径
 
 ```
 1. apps/platform/src/odp_platform/common/paths.py       ← 路径是基础
@@ -434,7 +482,7 @@ docs/architecture/
 6. apps/platform/tests/                                 ← 测试用例
 ```
 
-### 8.4 自学延伸方向
+### 9.4 自学延伸方向
 
 - **模型优化**：YOLO 模型压缩（剪枝/量化/TensorRT）
 - **Web 服务**：用 FastAPI 封装推理 API

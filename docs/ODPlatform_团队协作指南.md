@@ -272,8 +272,10 @@ ODPlatform/
 │   │   │   └── webui/               # ★ [前端]
 │   │   │       ├── __init__.py
 │   │   │       ├── app.py           # 主入口 + Gr.Launch
+│   │   │       ├── user_tabs.py     # 用户 Tab：检测/摄像头/模型/LLM + 实验可视化
 │   │   │       ├── dashboard.py
 │   │   │       ├── dataset_browser.py
+│   │   │       ├── dataset_analysis.py
 │   │   │       ├── training_tab.py
 │   │   │       ├── model_demo.py
 │   │   │       ├── validation_tab.py
@@ -704,47 +706,42 @@ head:
 ```python
 # webui/app.py
 import gradio as gr
+from odp_platform.webui.user_tabs import (
+    create_single_detection_ui, create_folder_detection_ui,
+    create_video_detection_ui, create_live_camera_ui,
+    create_model_selection_ui, create_llm_chat_ui,
+)
 from odp_platform.webui.dashboard import create_dashboard_ui
 from odp_platform.webui.dataset_browser import create_dataset_browser_ui
 from odp_platform.webui.training_tab import create_training_ui
 from odp_platform.webui.model_demo import create_model_demo_ui
 from odp_platform.webui.validation_tab import create_validation_ui
 from odp_platform.webui.config_tab import create_config_ui
-
-def create_app() -> gr.Blocks:
-    with gr.Blocks(title="ODPlatform", theme=gr.themes.Soft()) as app:
-        gr.Markdown("# ODPlatform — 目标检测开发平台")
-
-        with gr.Tabs():
-            with gr.TabItem("Dashboard"):
-                create_dashboard_ui()
-            with gr.TabItem("数据集浏览"):
-                create_dataset_browser_ui()
-            with gr.TabItem("训练"):
-                create_training_ui()
-            with gr.TabItem("模型演示"):
-                create_model_demo_ui()
-            with gr.TabItem("数据校验"):
-                create_validation_ui()
-            with gr.TabItem("配置管理"):
-                create_config_ui()
-
-    return app
-
-if __name__ == "__main__":
-    create_app().launch(server_name="0.0.0.0", server_port=7860)
 ```
 
-**6 个 Tab 的调用依赖**：
+**双模式 Tab 架构**：
 
-| Tab | 文件 | 关键 import / 调用 | 依赖方 |
+用户模式（`_create_user_tabs()`）：
+
+| Tab | 文件 | 关键调用 | 依赖方 |
 |---|---|---|---|
-| Dashboard | `dashboard.py` | `from odp_platform.training.tracker import collect_results` | 训练模块 |
-| 数据集浏览 | `dataset_browser.py` | 读 `data/yolo/<dataset>/` 下 images/labels；读 YAML `names`/`nc` | 无（读文件） |
-| 训练 | `training_tab.py` | `from odp_platform.training.experiment import ExperimentConfig, run_experiment` | 训练模块 |
-| 模型演示 | `model_demo.py` | `from odp_platform.inference.engine import Detector`; `from odp_platform.inference.visualizer import draw_detections` | 推理模块 |
-| 数据校验 | `validation_tab.py` | `subprocess: odp-validate --dataset X` | 已有 CLI |
-| 配置管理 | `config_tab.py` | `subprocess: odp-config template; odp-config validate` | 已有 CLI |
+| 单图检测 | `user_tabs.py` | `Detector`, `draw_detections` | 推理模块 |
+| 文件夹检测 | `user_tabs.py` | `list_images`, `Detector` | 推理模块 |
+| 视频检测 | `user_tabs.py` | OpenCV 逐帧推理 | 推理模块 |
+| 实时摄像头 | `user_tabs.py` | OpenCV `VideoCapture`, 多后端 MSMF/DSHOW | 推理模块 |
+| 模型选择 | `user_tabs.py` | `list_model_files()` 模型扫描 + 上传 + 实验可视化 | 无 |
+| LLM对话 | `user_tabs.py` | DeepSeek API（urllib） | 无 |
+
+管理员模式额外 Tab：
+
+| Tab | 文件 | 关键调用 | 依赖方 |
+|---|---|---|---|
+| Dashboard | `dashboard.py` | 后端 API | 后端服务 |
+| 模型演示 | `model_demo.py` | `Detector`, `draw_detections` | 推理模块 |
+| 数据集浏览 | `dataset_browser.py` | 读 YAML + YOLO labels | 无 |
+| 训练 | `training_tab.py` | `subprocess: odp-train` | CLI |
+| 数据校验 | `validation_tab.py` | `subprocess: odp-validate` | CLI |
+| 配置管理 | `config_tab.py` | `subprocess: odp-config` | CLI |
 
 **`model_demo.py` 核心交互**：
 

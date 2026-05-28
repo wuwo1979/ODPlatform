@@ -58,14 +58,27 @@ odp-infer detect --model best.pt --input video.mp4 --output results/
 
 ## WebUI — 可视化操作界面
 
-`odp-webui` 提供 6 个功能 Tab：
+`odp-webui` 提供用户和管理员双模式 Web 界面：
+
+### 用户模式 Tab
+
+| Tab | 功能 |
+|-----|------|
+| 单图检测 | 上传单张图片 + 选择模型进行推理 |
+| 文件夹检测 | 批量检测文件夹内图片，自动切换当前模型运行 |
+| 视频检测 | 上传视频逐帧检测，显示预览图 + 明细表 |
+| 实时摄像头 | 通过 OpenCV 读取摄像头实时流，支持分辨率切换 |
+| 模型选择 | 选择/刷新可用模型，上传 .pt 文件，或手动输入路径；底部折叠展示实验训练结果 |
+| LLM对话 | 集成 DeepSeek API（默认 deepseek-v4-flash），对话式协助 |
+
+### 管理员模式 Tab（用户模式 + 额外）
 
 | Tab | 功能 | 源文件 |
 |-----|------|--------|
-| Dashboard | 项目概览、实验状态（需后端） | `webui/dashboard.py` |
+| Dashboard | 项目概览、实验状态 | `webui/dashboard.py` |
+| 模型演示 | 加载模型 + 推理可视化 | `webui/model_demo.py` |
 | 数据集浏览 | 查看图片 + 标注 | `webui/dataset_browser.py` |
 | 训练 | 配置参数 + 启动训练 | `webui/training_tab.py` |
-| 模型演示 | 加载模型 + 推理可视化 | `webui/model_demo.py` |
 | 数据校验 | 运行质检 + 查看报告 | `webui/validation_tab.py` |
 | 配置管理 | 生成/验证/追踪配置 | `webui/config_tab.py` |
 
@@ -114,10 +127,12 @@ ODPlatform/
 │       │   ├── visualizer.py       检测结果绘制 + 信息面板
 │       │   ├── benchmark.py        性能基准测试
 │       │   └── utils.py            辅助工具
-│       ├── webui/              Gradio 前端（6 个 Tab）
+│       ├── webui/              Gradio 前端（用户+管理员双模式）
 │       │   ├── app.py          入口，自动启动后端
+│       │   ├── user_tabs.py    用户 Tab（检测/摄像头/模型/LLM）+ 实验可视化
 │       │   ├── dashboard.py / model_demo.py / dataset_browser.py
 │       │   ├── training_tab.py / validation_tab.py / config_tab.py
+│       │   ├── dataset_analysis.py / experiment_viz.py（已并入 user_tabs.py）
 │       │   └── utils.py        通用工具函数
 │       └── cli/                命令行入口（含 odp-webui / odp-backend）
 ├── docs/                       文档 + ADR + SRS

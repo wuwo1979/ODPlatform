@@ -287,7 +287,10 @@ config_manager/
 # 启动 WebUI（自动启动本地后端 + 数据库）
 odp-webui
 
-# 仅启动 FastAPI 后端（单独进程，供 Dashboard 使用）
+# 指定端口
+odp-webui --port 7861
+
+# 仅启动 FastAPI 后端（单独进程）
 odp-backend
 
 # 或通过 Python 直接启动
@@ -295,39 +298,71 @@ python apps\platform\src\odp_platform\webui\app.py
 ```
 
 > **注意**：
-> - `odp-webui` 在启动 Gradio 的同时，会**自动启动** FastAPI + SQLite 后端（subprocess）。Dashboard Tab 需要后端连接才能显示实验数据。
-> - 后端可独立运行：`odp-backend`，此时 WebUI 不会自动启动后端。
-> - `pyproject.toml` 中依赖写的是 `gradio>=5.0,<6.0`，但实际环境安装的是 Gradio 6.14.0（版本约束宽松可装）。`theme`/`css` 参数在 `gr.Blocks()` 中仍可用，Gradio 6.x 只会报 `UserWarning`，不影响功能。
-> - **不要**用 `create_app().launch()` 方式启动，因为缺少 `allowed_paths` 参数会导致壁纸等静态资源无法加载。
+> - `odp-webui` 在启动 Gradio 的同时，会**自动启动** FastAPI + SQLite 后端（subprocess）。
+> - 后端可独立运行：`odp-backend`。
+> - 访问地址：`http://localhost:7860`
 
-### 访问地址
+### 双模式架构
 
-启动后浏览器打开：`http://localhost:7860`
+项目提供**用户模式**和**管理员模式**两套界面，通过密码切换。
 
-### 功能 Tab
+#### 用户模式 Tab
 
 | Tab | 功能 | 源文件 |
 |-----|------|--------|
-| Dashboard | 项目概览、实验状态 | `webui/dashboard.py` |
+| 单图检测 | 上传单张图片 + 选择模型进行推理 | `webui/user_tabs.py` |
+| 文件夹检测 | 批量检测文件夹内图片 | `webui/user_tabs.py` |
+| 视频检测 | 上传视频逐帧检测，显示预览图 + 明细 | `webui/user_tabs.py` |
+| 实时摄像头 | OpenCV 摄像头实时检测，支持分辨率切换 | `webui/user_tabs.py` |
+| 模型选择 | 刷新/上传 .pt / 手动路径 + 实验训练结果展示 | `webui/user_tabs.py` |
+| LLM对话 | DeepSeek API（默认 deepseek-v4-flash）对话 | `webui/user_tabs.py` |
+
+#### 管理员模式 Tab（额外）
+
+| Tab | 功能 | 源文件 |
+|-----|------|--------|
+| Dashboard | 项目概览、后端状态 | `webui/dashboard.py` |
+| 模型演示 | 加载模型 + 推理可视化 | `webui/model_demo.py` |
 | 数据集浏览 | 查看图片 + 标注 | `webui/dataset_browser.py` |
 | 训练 | 配置参数 + 启动训练 | `webui/training_tab.py` |
-| 模型演示 | 加载模型 + 推理可视化 | `webui/model_demo.py` |
 | 数据校验 | 运行质检 + 查看报告 | `webui/validation_tab.py` |
 | 配置管理 | 生成/验证/追踪配置 | `webui/config_tab.py` |
+
+### 模型选择详解
+
+- 自动扫描 `data/models/checkpoints/` 目录下所有 `.pt` 文件
+- **上传模型**：点击上传按钮选择 `.pt` 文件，自动复制到 checkpoints 目录
+- **手动路径**：在文本框输入任意路径的 `.pt` 文件
+- **实验训练结果**（折叠面板）：展开后展示所选实验的训练曲线、混淆矩阵、PR/F1 曲线、类别分布
+
+### 实验可视化
+
+实验文件夹位于 `data/runs/experiments/<实验名>/`，包含：
+
+| 文件 | 说明 |
+|------|------|
+| `results.png` | 训练 Loss + 验证指标曲线 |
+| `confusion_matrix.png` | 混淆矩阵热力图 |
+| `confusion_matrix_normalized.png` | 归一化混淆矩阵 |
+| `BoxPR_curve.png` | PR 曲线 |
+| `BoxF1_curve.png` | F1 曲线 |
+| `labels.jpg` | 类别分布柱状图 |
+| `results.csv` | 逐轮训练指标（动态绘图用） |
 
 ### 架构说明
 
 ```
 webui/
 ├── app.py               # create_app() + main() 入口
+├── user_tabs.py         # 用户 Tab：检测/摄像头/模型/LLM + 实验可视化
 ├── dashboard.py         # Dashboard Tab
 ├── dataset_browser.py   # 数据集浏览 Tab
+├── dataset_analysis.py  # 数据集分析（类分布/热力图）
 ├── training_tab.py      # 训练 Tab
 ├── model_demo.py        # 模型演示 Tab
 ├── validation_tab.py    # 数据校验 Tab
 ├── config_tab.py        # 配置管理 Tab
-├── utils.py             # 通用 UI 工具函数
-└── assets/              # 静态资源（壁纸等）
+└── utils.py             # 通用 UI 工具函数（模型扫描/图片列表）
 ```
 
 ---
