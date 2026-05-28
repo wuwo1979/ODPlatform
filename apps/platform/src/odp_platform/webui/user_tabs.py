@@ -1207,7 +1207,7 @@ def create_llm_chat_ui() -> None:
                 placeholder="如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o",
                 scale=1,
             )
-    with gr.Row(elem_classes=["odp-agent-toggle"]):
+    with gr.Row(elem_classes=["odp-row", "odp-agent-toggle"]):
         enable_tools = gr.Checkbox(
             label="✅ Agent 工具已启用（模型/实验/推理/GPU）",
             value=True,

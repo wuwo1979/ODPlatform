@@ -61,6 +61,7 @@ APP_CSS = """
   --odp-topbar: 82px;
   --odp-content-pad-x: 42px;
   --odp-radius: 18px;
+  --odp-page-title-width: clamp(190px, 20vw, 280px);
 }
 
 *,
@@ -514,10 +515,10 @@ button.odp-gear-button {
   max-height: 48px !important;
   padding: 0 !important;
   margin-left: auto !important;
-  border: 0 !important;
+  border: 1px solid #fde7b0 !important;
   border-radius: 14px !important;
-  background: var(--odp-soft) !important;
-  color: #70778a !important;
+  background: var(--odp-yellow-soft) !important;
+  color: var(--odp-yellow) !important;
   box-shadow: none !important;
   text-shadow: none !important;
   transform: none !important;
@@ -1002,6 +1003,80 @@ div.chatbot [class*="user"] *,
   font-weight: 800 !important;
 }
 
+.odp-user-head {
+  position: relative !important;
+  z-index: 2 !important;
+  display: grid !important;
+  grid-template-columns: var(--odp-page-title-width) minmax(0, 1fr) !important;
+  gap: 14px !important;
+  align-items: center !important;
+  width: auto !important;
+  max-width: none !important;
+  margin-left: var(--odp-sidebar) !important;
+  padding: 72px 24px 8px !important;
+  transition: margin-left 180ms ease, padding 180ms ease !important;
+}
+
+.odp-user-title {
+  width: var(--odp-page-title-width) !important;
+  max-width: var(--odp-page-title-width) !important;
+  height: 44px !important;
+  min-height: 44px !important;
+  max-height: 44px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--odp-text) !important;
+  font-size: 18px !important;
+  font-weight: 900 !important;
+}
+
+.odp-user-title-card {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  min-height: 44px !important;
+  padding: 0 !important;
+  color: var(--odp-text) !important;
+}
+
+.odp-user-title-card::before {
+  content: "";
+  flex: 0 0 6px !important;
+  width: 6px !important;
+  height: 26px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(180deg, var(--odp-blue), #7c5cff) !important;
+  box-shadow: 0 8px 18px rgba(83, 104, 246, 0.18) !important;
+}
+
+.odp-user-title-card span {
+  display: block !important;
+  overflow: hidden !important;
+  font-size: 20px !important;
+  line-height: 1 !important;
+  font-weight: 950 !important;
+  letter-spacing: 0 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.odp-user-title-card small {
+  display: block !important;
+  overflow: hidden !important;
+  margin-top: 4px !important;
+  color: var(--odp-muted) !important;
+  font-size: 10.5px !important;
+  line-height: 1.1 !important;
+  font-weight: 800 !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
 .odp-admin-layer .tabs {
   min-height: calc(100vh - 154px) !important;
   padding-top: 12px !important;
@@ -1162,6 +1237,107 @@ div.chatbot [class*="user"] *,
   flex: 1 !important;
 }
 
+/* ── 管理员登录弹窗（纯 HTML） ── */
+.odp-admin-login,
+.odp-admin-login * {
+  box-sizing: border-box !important;
+}
+.odp-admin-login {
+  width: 100% !important;
+  background: #ffffff !important;
+  color: var(--odp-text) !important;
+}
+.odp-modal-card .html-container,
+.odp-modal-card .prose,
+.odp-admin-login-title,
+.odp-admin-form-field,
+.odp-admin-form-field span,
+.odp-admin-error-text,
+.odp-modal-actions {
+  background: #ffffff !important;
+}
+.odp-admin-login-title {
+  margin-bottom: 16px !important;
+}
+.odp-admin-login-title strong {
+  display: block !important;
+  font-size: 19px !important;
+  line-height: 1.15 !important;
+  font-weight: 900 !important;
+  letter-spacing: 0 !important;
+}
+.odp-admin-login-title small {
+  display: block !important;
+  margin-top: 5px !important;
+  color: var(--odp-muted) !important;
+  font-size: 12px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+}
+.odp-admin-form-field {
+  display: block !important;
+  margin-bottom: 12px !important;
+}
+.odp-admin-form-field span {
+  display: block !important;
+  margin-bottom: 7px !important;
+  color: var(--odp-text) !important;
+  font-size: 13px !important;
+  line-height: 1.1 !important;
+  font-weight: 800 !important;
+}
+.odp-admin-password-input {
+  width: 100% !important;
+  min-height: 46px !important;
+  padding: 0 14px !important;
+  border: 1px solid var(--odp-line) !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  color: var(--odp-text) !important;
+  box-shadow: 0 8px 18px rgba(23, 24, 43, 0.04) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+}
+.odp-admin-password-input::placeholder {
+  color: #9aa1b2 !important;
+  font-weight: 700 !important;
+}
+.odp-admin-error-text {
+  min-height: 18px !important;
+  margin: -2px 0 12px !important;
+  color: var(--odp-pink) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  line-height: 1.2 !important;
+  opacity: 0 !important;
+}
+.odp-admin-error-text.is-visible {
+  opacity: 1 !important;
+}
+
+.odp-admin-cancel-btn,
+.odp-admin-confirm-btn {
+  min-height: 44px !important;
+  padding: 0 20px !important;
+  border-radius: 12px !important;
+  font-weight: 700 !important;
+  font-size: 15px !important;
+  cursor: pointer !important;
+  line-height: 1 !important;
+}
+.odp-admin-cancel-btn {
+  flex: 1 !important;
+  background: #f1f3fb !important;
+  color: #17182b !important;
+  border: 1px solid var(--odp-line) !important;
+}
+.odp-admin-confirm-btn {
+  flex: 1 !important;
+  background: #5368f6 !important;
+  color: #ffffff !important;
+  border: 0 !important;
+}
+
 /* ── Agent 工具开关 ── */
 .odp-agent-toggle label {
   display: flex !important;
@@ -1268,9 +1444,6 @@ html { scrollbar-gutter: stable; }
   max-width: 100% !important;
   overflow-x: hidden !important;
 }
-
-/* JS layer control: hidden by default */
-.odp-layer-hidden { display: none !important; }
 
 /* ── 强制白底（覆盖Gradio 6.0深色主题） ── */
 body,
@@ -1453,20 +1626,28 @@ def create_app() -> gr.Blocks:
                 with gr.Row(elem_classes=["odp-mode-bar"]):
                     gr.HTML(
                         """
-                        <button type="button" class="odp-gear-button" style="
-                            flex:0 0 48px;width:48px;min-width:48px;max-width:48px;
-                            height:48px;min-height:48px;max-height:48px;padding:0;margin-left:auto;
-                            border:0;border-radius:14px;background:#f1f3fb;color:#70778a;
-                            font-size:20px;cursor:pointer;display:grid;place-items:center;
-                        "
+                        <button type="button" class="odp-gear-button" aria-label="进入管理员模式"
                         onclick="
                             document.querySelector('.odp-admin-modal').classList.remove('odp-modal-hidden');
-                            var i = document.querySelector('.odp-admin-password input');
+                            var i = document.querySelector('.odp-admin-password-input');
                             if(i)i.value='';
-                            var e = document.querySelector('.odp-admin-error input');
-                            if(e)e.value='';
-                        ">⚙️</button>
+                            var e = document.querySelector('.odp-admin-error-text');
+                            if(e){e.textContent='';e.classList.remove('is-visible');}
+                            setTimeout(function(){ if(i)i.focus(); }, 0);
+                        ">&#9881;</button>
                         """,
+                    )
+                with gr.Row(elem_classes=["odp-user-head"]):
+                    gr.HTML(
+                        """
+                        <div class="odp-user-title-card">
+                            <div>
+                                <span>用户工作台</span>
+                                <small>低空智瞰 · 目标检测与结果查看</small>
+                            </div>
+                        </div>
+                        """,
+                        elem_classes=["odp-user-title"],
                     )
                 _create_user_tabs()
 
@@ -1496,10 +1677,11 @@ def create_app() -> gr.Blocks:
                              document.querySelector('.odp-admin-layer').classList.add('odp-layer-hidden');
                              document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
                              localStorage.setItem('odp_admin','0');
-                             var i = document.querySelector('.odp-admin-password input');
+                             if(window.odpResetContentScroll) window.odpResetContentScroll();
+                             var i = document.querySelector('.odp-admin-password-input');
                              if(i)i.value='';
-                             var e = document.querySelector('.odp-admin-error input');
-                             if(e)e.value='';
+                             var e = document.querySelector('.odp-admin-error-text');
+                             if(e){e.textContent='';e.classList.remove('is-visible');}
                          ">返回用户模式</button>
                         """,
                     )
@@ -1507,58 +1689,60 @@ def create_app() -> gr.Blocks:
 
             with gr.Column(elem_classes=["odp-admin-modal", "odp-modal-hidden"]):
                 with gr.Group(elem_classes=["odp-modal-card"]):
-                    gr.Textbox(
-                        label="管理员密码",
-                        type="password",
-                        placeholder="请输入密码",
-                        max_lines=1,
-                        elem_classes=["odp-admin-password"],
+                    gr.HTML(
+                        """
+                        <div class="odp-admin-login">
+                            <div class="odp-admin-login-title">
+                                <strong>管理员模式</strong>
+                                <small>输入密码后进入系统配置与模型运维</small>
+                            </div>
+                            <label class="odp-admin-form-field">
+                                <span>管理员密码</span>
+                                <input class="odp-admin-password-input" type="password" placeholder="请输入密码"
+                                    autocomplete="current-password"
+                                    oninput="
+                                        var e=document.querySelector('.odp-admin-error-text');
+                                        if(e){e.textContent='';e.classList.remove('is-visible');}
+                                    "
+                                    onkeydown="
+                                        if(event.key==='Enter'){
+                                            event.preventDefault();
+                                            document.querySelector('.odp-admin-confirm-btn').click();
+                                        }
+                                    "
+                                />
+                            </label>
+                            <div class="odp-admin-error-text" role="status" aria-live="polite"></div>
+                            <div class="odp-modal-actions">
+                                <button class="odp-admin-cancel-btn" type="button"
+                                onclick="
+                                    document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
+                                    var i = document.querySelector('.odp-admin-password-input');
+                                    if(i)i.value='';
+                                    var e = document.querySelector('.odp-admin-error-text');
+                                    if(e){e.textContent='';e.classList.remove('is-visible');}
+                                ">取消</button>
+                                <button class="odp-admin-confirm-btn" type="button"
+                                onclick="
+                                    var i = document.querySelector('.odp-admin-password-input');
+                                    var e = document.querySelector('.odp-admin-error-text');
+                                    var v = i ? i.value : '';
+                                    if(v === '0000') {
+                                        document.querySelector('.odp-user-layer').classList.add('odp-layer-hidden');
+                                        document.querySelector('.odp-admin-layer').classList.remove('odp-layer-hidden');
+                                        document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
+                                        localStorage.setItem('odp_admin','1');
+                                        if(window.odpResetContentScroll) window.odpResetContentScroll();
+                                        if(i)i.value='';
+                                        if(e){e.textContent='';e.classList.remove('is-visible');}
+                                    } else {
+                                        if(e){e.textContent='密码错误';e.classList.add('is-visible');}
+                                    }
+                                ">进入</button>
+                            </div>
+                        </div>
+                        """,
                     )
-                    gr.Textbox(
-                        label="状态",
-                        value="",
-                        interactive=False,
-                        max_lines=1,
-                        elem_classes=["odp-admin-error"],
-                    )
-                    with gr.Row(elem_classes=["odp-row", "odp-modal-actions"]):
-                        gr.HTML(
-                            """
-                            <button class="odp-admin-cancel-btn" style="
-                                flex:1;min-height:44px;padding:0 20px;
-                                border-radius:12px;border:1px solid var(--odp-line);
-                                background:#f1f3fb;color:#17182b;
-                                font-weight:700;font-size:15px;cursor:pointer;
-                            "
-                            onclick="
-                                document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
-                                var i = document.querySelector('.odp-admin-password input');
-                                if(i)i.value='';
-                                var e = document.querySelector('.odp-admin-error input');
-                                if(e)e.value='';
-                            ">取消</button>
-                            <button class="odp-admin-confirm-btn" style="
-                                flex:1;min-height:44px;padding:0 20px;
-                                border-radius:12px;border:0;
-                                background:#5368f6;color:#ffffff;
-                                font-weight:700;font-size:15px;cursor:pointer;
-                            "
-                        onclick="
-                            var i = document.querySelector('.odp-admin-password input');
-                            var e = document.querySelector('.odp-admin-error input');
-                            var v = i ? i.value : '';
-                            if(v === '0000') {
-                                document.querySelector('.odp-user-layer').classList.add('odp-layer-hidden');
-                                document.querySelector('.odp-admin-layer').classList.remove('odp-layer-hidden');
-                                document.querySelector('.odp-admin-modal').classList.add('odp-modal-hidden');
-                                localStorage.setItem('odp_admin','1');
-                                if(e)e.value='';
-                            } else {
-                                if(e)e.value='密码错误';
-                            }
-                        ">进入</button>
-                            """,
-                        )
     return app
 
 
