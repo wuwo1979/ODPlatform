@@ -53,7 +53,6 @@ def _release_server_camera():
                 pass
             _server_cap_ref[0] = None
     _server_cam_stop.set()
-    torch.cuda.empty_cache()
 
 
 def _gpu_info() -> str:
@@ -340,7 +339,10 @@ def _run_server_camera(
     iou: float,
     cam_res: str = "640x480",
 ) -> Any:
+    import contextlib
+    import io
     import os
+    import time as _time
     import warnings
 
     import cv2
@@ -350,15 +352,11 @@ def _run_server_camera(
 
     _release_server_camera()
     _server_cam_stop.clear()
-    import time as _time
 
     os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
     warnings.filterwarnings("ignore", message=".*obsensor.*")
     warnings.filterwarnings("ignore", message=".*FFMPEG.*")
     warnings.filterwarnings("ignore", message=".*backend.*")
-
-    import io
-    import contextlib
 
     cap = None
     with contextlib.redirect_stderr(io.StringIO()):
@@ -366,38 +364,34 @@ def _run_server_camera(
         orig_stderr = os.dup(2)
         os.dup2(null_fd, 2)
         try:
-            backends_to_try = [cv2.CAP_DSHOW]
-            if hasattr(cv2, "CAP_MSMF"):
-                backends_to_try.insert(0, cv2.CAP_MSMF)
-
-            for backend in backends_to_try:
-                try:
-                    candidate = cv2.VideoCapture(cam_id, backend)
-                    if candidate.isOpened():
-                        cap = candidate
-                        break
-                    candidate.release()
-                except Exception:
-                    continue
-
-            if cap is None:
-                try:
-                    cap = cv2.VideoCapture(cam_id)
-                    if not cap.isOpened():
-                        cap = None
-                except Exception:
-                    cap = None
+            for try_id in [cam_id, 0, 1]:
+                backends = [cv2.CAP_DSHOW]
+                if hasattr(cv2, "CAP_MSMF"):
+                    backends.insert(0, cv2.CAP_MSMF)
+                for backend in backends:
+                    try:
+                        candidate = cv2.VideoCapture(try_id, backend)
+                        if candidate.isOpened():
+                            cap = candidate
+                            break
+                        candidate.release()
+                    except Exception:
+                        continue
+                if cap is not None:
+                    break
         finally:
             os.dup2(orig_stderr, 2)
             os.close(null_fd)
             os.close(orig_stderr)
 
     if cap is None:
-        no_cam = np.full((480, 640, 3), (245, 245, 245), dtype=np.uint8)
-        cv2.putText(no_cam, "未检测到摄像头", (160, 240),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 2)
+        no_cam = np.full((480, 640, 3), (55, 55, 55), dtype=np.uint8)
+        cv2.putText(no_cam, "⚠️ 未检测到摄像头", (60, 210),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, (200, 200, 200), 2)
+        cv2.putText(no_cam, "请插入摄像头后点击“释放并刷新”重试", (40, 260),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (160, 160, 160), 1)
         while not _server_cam_stop.is_set():
-            yield no_cam
+            yield no_cam.copy()
             _time.sleep(0.5)
         return
 
@@ -881,7 +875,7 @@ def create_live_camera_ui() -> None:
     server_cam_out = gr.Image(streaming=True, label="实时检测结果", container=True)
 
     refresh_btn.click(fn=_refresh_models, outputs=[model_dd])
-    start_server_cam_btn.click(
+    cam_stream = start_server_cam_btn.click(
         fn=_run_server_camera,
         inputs=[cam_id, model_dd, conf_slider, iou_slider, cam_res],
         outputs=[server_cam_out],
@@ -889,10 +883,12 @@ def create_live_camera_ui() -> None:
     stop_server_cam_btn.click(
         fn=lambda: (_release_server_camera(), "已停止")[1],
         outputs=[server_cam_status],
+        cancels=[cam_stream],
     )
     refresh_server_cam_btn.click(
         fn=lambda: (_release_server_camera(), _gpu_info())[1],
         outputs=[gpu_info_box],
+        cancels=[cam_stream],
     ).then(
         fn=lambda: "已释放，可重新启动",
         outputs=[server_cam_status],
