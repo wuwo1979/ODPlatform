@@ -350,36 +350,50 @@ def _run_server_camera(
 
     _release_server_camera()
     _server_cam_stop.clear()
+    import time as _time
 
-    os.environ["OPENCV_LOG_LEVEL"] = "ERROR"
+    os.environ["OPENCV_LOG_LEVEL"] = "FATAL"
     os.environ["OBSENSOR_DEBUG"] = "0"
+    cv2.setLogLevel(0)
     warnings.filterwarnings("ignore", message=".*obsensor.*")
     warnings.filterwarnings("ignore", message=".*FFMPEG.*")
+    warnings.filterwarnings("ignore", message=".*backend.*")
 
-    backends_to_try = [cv2.CAP_DSHOW]
-    if hasattr(cv2, "CAP_MSMF"):
-        backends_to_try.insert(0, cv2.CAP_MSMF)
+    import io
+    import contextlib
 
     cap = None
-    for backend in backends_to_try:
-        try:
-            candidate = cv2.VideoCapture(cam_id, backend)
-            if candidate.isOpened():
-                cap = candidate
-                break
-            candidate.release()
-        except Exception:
-            continue
+    with contextlib.redirect_stderr(io.StringIO()):
+        backends_to_try = [cv2.CAP_DSHOW]
+        if hasattr(cv2, "CAP_MSMF"):
+            backends_to_try.insert(0, cv2.CAP_MSMF)
+
+        for backend in backends_to_try:
+            try:
+                candidate = cv2.VideoCapture(cam_id, backend)
+                if candidate.isOpened():
+                    cap = candidate
+                    break
+                candidate.release()
+            except Exception:
+                continue
+
+        if cap is None:
+            try:
+                cap = cv2.VideoCapture(cam_id)
+                if not cap.isOpened():
+                    cap = None
+            except Exception:
+                cap = None
 
     if cap is None:
-        try:
-            cap = cv2.VideoCapture(cam_id)
-            if not cap.isOpened():
-                yield None
-                return
-        except Exception:
-            yield None
-            return
+        no_cam = np.full((480, 640, 3), (245, 245, 245), dtype=np.uint8)
+        cv2.putText(no_cam, "未检测到摄像头", (160, 240),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 2)
+        while not _server_cam_stop.is_set():
+            yield no_cam
+            _time.sleep(0.5)
+        return
 
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -394,7 +408,6 @@ def _run_server_camera(
     with _server_cap_lock:
         _server_cap_ref[0] = cap
 
-    import time as _time
     frame_count = 0
     fps_timer = _time.time()
     fps_samples = []
